@@ -1,0 +1,34 @@
+# Build output
+build/
+
+# Third-party dependencies (too large for git)
+iPlug2/
+ffmpeg/
+
+# Debug logs
+*.log
+
+# Windows artifacts
+nul
+*.exe
+*.dll
+*.obj
+*.pdb
+*.ilk
+*.lib
+*.exp
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.ncb
+*.sdf
+*.opensdf
+*.opendb
+ipch/
+
+# CMake
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
