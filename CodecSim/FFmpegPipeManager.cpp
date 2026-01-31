@@ -486,7 +486,9 @@ void FFmpegPipeManager::TerminateProcesses()
 
 std::string FFmpegPipeManager::BuildEncoderCommand(const Config& config) const
 {
-  std::string intermediateFormat = GetIntermediateFormat(config.codecName);
+  std::string muxFormat = config.muxerFormat;
+  if (muxFormat.empty())
+    muxFormat = GetIntermediateFormat(config.codecName);  // Fallback
 
   std::ostringstream oss;
   oss << "\"" << config.ffmpegPath << "\"";
@@ -499,7 +501,7 @@ std::string FFmpegPipeManager::BuildEncoderCommand(const Config& config) const
   oss << " -b:a " << config.bitrate;
   if (!config.additionalArgs.empty())
     oss << " " << config.additionalArgs;
-  oss << " -f " << intermediateFormat;
+  oss << " -f " << muxFormat;
   oss << " pipe:1";
 
   return oss.str();
@@ -507,13 +509,14 @@ std::string FFmpegPipeManager::BuildEncoderCommand(const Config& config) const
 
 std::string FFmpegPipeManager::BuildDecoderCommand(const Config& config) const
 {
-  std::string intermediateFormat = GetIntermediateFormat(config.codecName);
-
-  // Map muxer format names to demuxer format names where they differ
-  // "adts" is a muxer-only name; the demuxer is called "aac"
-  std::string demuxFormat = intermediateFormat;
-  if (demuxFormat == "adts")
-    demuxFormat = "aac";
+  std::string demuxFormat = config.demuxerFormat;
+  if (demuxFormat.empty())
+  {
+    // Fallback: derive from codec name and fix adts->aac mapping
+    demuxFormat = GetIntermediateFormat(config.codecName);
+    if (demuxFormat == "adts")
+      demuxFormat = "aac";
+  }
 
   std::ostringstream oss;
   oss << "\"" << config.ffmpegPath << "\"";

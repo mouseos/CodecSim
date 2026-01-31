@@ -12,6 +12,8 @@ iplug_add_plugin(${PROJECT_NAME}
     CodecSim.h
     CodecProcessor.cpp
     CodecProcessor.h
+    CodecRegistry.cpp
+    CodecRegistry.h
     FFmpegPipeManager.cpp
     FFmpegPipeManager.h
     resources/resource.h

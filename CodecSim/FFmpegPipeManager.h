@@ -48,6 +48,8 @@ public:
     int channels;                     // Number of channels (e.g., 2)
     int bitrate;                      // Bitrate in bps (e.g., 128000)
     std::string additionalArgs;       // Additional ffmpeg arguments
+    std::string muxerFormat;          // Container format for encoder output (e.g., "mp3", "adts", "ogg")
+    std::string demuxerFormat;        // Container format for decoder input (e.g., "mp3", "aac", "ogg")
     size_t bufferSize;                // Internal buffer size in bytes
 
     Config()

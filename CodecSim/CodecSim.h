@@ -14,23 +14,13 @@ const int kNumPresets = 1;
 //==============================================================================
 enum EParams
 {
-  // Common parameters
-  kParamCodec = 0,      // Codec selection (0=MP3, 1=HE-AAC)
-  kParamBitrate,        // Bitrate in kbps (16-510)
-  kParamSampleRate,     // Sample rate selection (0=44100, 1=48000, 2=96000)
+  kParamCodec = 0,      // Codec selection (dynamic, based on available codecs)
+  kParamBitrate,        // Bitrate preset selection (enum: 32,48,64,96,128,160,192,256,320,Other)
+  kParamBitrateCustom,  // Custom bitrate in kbps (used when "Other" is selected)
+  kParamSampleRate,     // Sample rate selection (enum: 8000,16000,22050,32000,44100,48000,88200,96000)
   kParamEnabled,        // Start/Stop toggle (0=stopped, 1=running)
 
   kNumParams
-};
-
-//==============================================================================
-// Codec Type Enumeration
-//==============================================================================
-enum class ECodecType
-{
-  MP3 = 0,
-  HEAAC,
-  kNumCodecs
 };
 
 //==============================================================================
@@ -41,109 +31,16 @@ enum ECtrlTags
   kCtrlTagVersionNumber = 0,
   kCtrlTagTitle,
 
-  // Common controls
   kCtrlTagCodecSelector,
-  kCtrlTagBitrateSlider,
+  kCtrlTagBitrateSelector,
+  kCtrlTagBitrateCustom,
   kCtrlTagSampleRateSelector,
-  kCtrlTagMixSlider,
-
-  // Meter/display controls
-  kCtrlTagInputMeter,
-  kCtrlTagOutputMeter,
-  kCtrlTagLatencyDisplay,
-  kCtrlTagBitrateDisplay,
 
   kCtrlTagStartStopButton,
   kCtrlTagStatusDisplay,
   kCtrlTagLogDisplay,
 
   kNumCtrlTags
-};
-
-//==============================================================================
-// Ring Buffer Class
-//==============================================================================
-template <typename T>
-class RingBuffer
-{
-public:
-  RingBuffer(size_t capacity = 65536)
-    : mBuffer(capacity)
-    , mCapacity(capacity)
-    , mWritePos(0)
-    , mReadPos(0)
-    , mAvailable(0)
-  {
-  }
-
-  void Resize(size_t newCapacity)
-  {
-    mBuffer.resize(newCapacity);
-    mCapacity = newCapacity;
-    Clear();
-  }
-
-  void Clear()
-  {
-    mWritePos = 0;
-    mReadPos = 0;
-    mAvailable = 0;
-  }
-
-  size_t Write(const T* data, size_t count)
-  {
-    size_t toWrite = std::min(count, mCapacity - mAvailable.load());
-    for (size_t i = 0; i < toWrite; ++i)
-    {
-      mBuffer[mWritePos] = data[i];
-      mWritePos = (mWritePos + 1) % mCapacity;
-    }
-    mAvailable.fetch_add(toWrite);
-    return toWrite;
-  }
-
-  size_t Read(T* data, size_t count)
-  {
-    size_t toRead = std::min(count, mAvailable.load());
-    for (size_t i = 0; i < toRead; ++i)
-    {
-      data[i] = mBuffer[mReadPos];
-      mReadPos = (mReadPos + 1) % mCapacity;
-    }
-    mAvailable.fetch_sub(toRead);
-    return toRead;
-  }
-
-  size_t Available() const { return mAvailable.load(); }
-  size_t Capacity() const { return mCapacity; }
-  size_t Space() const { return mCapacity - mAvailable.load(); }
-
-private:
-  std::vector<T> mBuffer;
-  size_t mCapacity;
-  size_t mWritePos;
-  size_t mReadPos;
-  std::atomic<size_t> mAvailable;
-};
-
-//==============================================================================
-// Encoder State Base Class
-//==============================================================================
-struct EncoderState
-{
-  virtual ~EncoderState() = default;
-  virtual void Reset() = 0;
-  virtual bool IsInitialized() const = 0;
-};
-
-//==============================================================================
-// Decoder State Base Class
-//==============================================================================
-struct DecoderState
-{
-  virtual ~DecoderState() = default;
-  virtual void Reset() = 0;
-  virtual bool IsInitialized() const = 0;
 };
 
 //==============================================================================
@@ -194,25 +91,20 @@ public:
 #endif
 
 private:
-  // Pre-allocated interleaved buffers for ProcessBlock (avoid allocation in audio thread)
+  // Pre-allocated interleaved buffers for ProcessBlock
   std::vector<float> mInterleavedInput;
   std::vector<float> mInterleavedOutput;
 
-  // Codec processors
+  // Codec processor
   std::unique_ptr<ICodecProcessor> mCodecProcessor;
 
-  // State tracking
-  ECodecType mCurrentCodec;
+  // State
+  int mCurrentCodecIndex;     // Index into available codec list
   int mSampleRate;
   int mNumChannels;
 
   // Latency tracking
   std::atomic<int> mLatencySamples;
-  std::atomic<int> mActualBitrate;
-
-  // Parameter cache for thread-safe access
-  std::atomic<int> mCodecParam;
-  std::atomic<int> mBitrateParam;
 
   // Log display
   std::vector<std::string> mLogMessages;
@@ -220,15 +112,14 @@ private:
   static constexpr int kMaxLogLines = 12;
 
   // Helper methods
-  void InitializeCodec(ECodecType codecType);
-  void UpdateCodecParameters();
+  void InitializeCodec(int codecIndex);
   void StopCodec();
   void AddLogMessage(const std::string& msg);
 
   // Thread safety
   std::recursive_mutex mCodecMutex;
 
-  bool mIsInitializing = false;  // Guard against re-entrant InitializeCodec calls
-  std::atomic<bool> mEnabled{false};   // Audio processing enabled (Start/Stop)
-  bool mConstructed = false;      // Prevent OnParamChange from triggering init during construction
+  bool mIsInitializing = false;
+  std::atomic<bool> mEnabled{false};
+  bool mConstructed = false;
 };
