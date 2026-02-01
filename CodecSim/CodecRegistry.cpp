@@ -248,7 +248,7 @@ void CodecRegistry::RegisterBuiltinCodecs()
       false,
       false
     },
-    // GSM 06.10
+    // GSM 06.10 (8kHz mono only)
     {
       "gsm",
       "GSM 06.10",
@@ -260,8 +260,305 @@ void CodecRegistry::RegisterBuiltinCodecs()
       13,
       160,
       160,
+      "-ar 8000 -ac 1",
+      false,
+      false
+    },
+    //==========================================================================
+    // Tier 1: Bluetooth / Mobile / Surround
+    //==========================================================================
+    // AMR-NB (mobile phone call codec, 3GPP, 8kHz mono only)
+    {
+      "amrnb",
+      "AMR-NB",
+      "libopencore_amrnb",
+      "amr",
+      "amr",
+      12,
+      5,
+      12,
+      160,
+      160,
+      "-ar 8000 -ac 1",
+      false,
+      false
+    },
+    // AMR-WB (HD Voice / VoLTE, 3GPP, 16kHz mono only)
+    {
+      "amrwb",
+      "AMR-WB",
+      "libvo_amrwbenc",
+      "amr",
+      "amr",
+      24,
+      7,
+      24,
+      320,
+      320,
+      "-ar 16000 -ac 1",
+      false,
+      false
+    },
+    // aptX (Bluetooth, fixed 4:1 ratio)
+    {
+      "aptx",
+      "aptX",
+      "aptx",
+      "aptx",
+      "aptx",
+      352,
+      352,
+      352,
+      4,
+      4,
+      "",
+      true,
+      false
+    },
+    // aptX HD (Bluetooth HD, fixed ratio)
+    {
+      "aptxhd",
+      "aptX HD",
+      "aptx_hd",
+      "aptx_hd",
+      "aptx_hd",
+      576,
+      576,
+      576,
+      4,
+      4,
+      "",
+      true,
+      false
+    },
+    // SBC (Bluetooth A2DP mandatory codec)
+    {
+      "sbc",
+      "SBC",
+      "sbc",
+      "sbc",
+      "sbc",
+      328,
+      128,
+      512,
+      128,
+      128,
       "",
       false,
+      false
+    },
+    // DTS (surround sound)
+    {
+      "dts",
+      "DTS",
+      "dca",
+      "dts",
+      "dts",
+      768,
+      320,
+      6144,
+      512,
+      512,
+      "-strict experimental",
+      false,
+      false
+    },
+    //==========================================================================
+    // Tier 2: Telephony / VoIP / ADPCM
+    //==========================================================================
+    // iLBC (WebRTC / VoIP, 8kHz mono only)
+    {
+      "ilbc",
+      "iLBC",
+      "libilbc",
+      "ilbc",
+      "ilbc",
+      13,
+      13,
+      15,
+      160,
+      160,
+      "-ar 8000 -ac 1",
+      false,
+      false
+    },
+    // G.723.1 (ultra-low bitrate telephony, 8kHz mono, 6.3/5.3 kbps only)
+    {
+      "g7231",
+      "G.723.1",
+      "g723_1",
+      "matroska",
+      "matroska",
+      6,
+      5,
+      6,
+      240,
+      240,
+      "-ar 8000 -ac 1 -b:a 6300",
+      false,
+      false
+    },
+    // G.722 ADPCM (ISDN wideband telephony)
+    {
+      "g722",
+      "G.722",
+      "g722",
+      "matroska",
+      "matroska",
+      64,
+      64,
+      64,
+      320,
+      320,
+      "",
+      true,
+      false
+    },
+    // G.726 ADPCM (classic telephony, 8kHz mono only)
+    {
+      "g726",
+      "G.726",
+      "g726",
+      "matroska",
+      "matroska",
+      32,
+      16,
+      40,
+      160,
+      160,
+      "-ar 8000 -ac 1",
+      false,
+      false
+    },
+    // ADPCM IMA WAV (game audio, fixed 4:1 ratio)
+    {
+      "adpcm_ima",
+      "ADPCM IMA",
+      "adpcm_ima_wav",
+      "wav",
+      "wav",
+      0,
+      0,
+      0,
+      1024,
+      1024,
+      "",
+      true,
+      false
+    },
+    // ADPCM Microsoft (classic Windows, fixed ratio)
+    {
+      "adpcm_ms",
+      "ADPCM MS",
+      "adpcm_ms",
+      "wav",
+      "wav",
+      0,
+      0,
+      0,
+      1024,
+      1024,
+      "",
+      true,
+      false
+    },
+    // Nellymoser (Flash-era streaming, mono only, max 44100Hz)
+    {
+      "nellymoser",
+      "Nellymoser",
+      "nellymoser",
+      "flv",
+      "flv",
+      64,
+      16,
+      64,
+      256,
+      256,
+      "-ar 44100 -ac 1",
+      false,
+      false
+    },
+    //==========================================================================
+    // Tier 3: Retro / Novelty / Extra
+    //==========================================================================
+    // RealAudio 1.0 (1995, 14.4k modem era)
+    {
+      "ra144",
+      "RealAudio 1.0",
+      "real_144",
+      "rm",
+      "rm",
+      8,
+      8,
+      8,
+      160,
+      160,
+      "",
+      true,
+      false
+    },
+    // DFPWM (1-bit audio, Minecraft ComputerCraft)
+    {
+      "dfpwm",
+      "DFPWM",
+      "dfpwm",
+      "dfpwm",
+      "dfpwm",
+      48,
+      48,
+      48,
+      1024,
+      1024,
+      "",
+      true,
+      false
+    },
+    // WMA v1 (Windows Media Audio 1)
+    {
+      "wmav1",
+      "WMA v1",
+      "wmav1",
+      "asf",
+      "asf",
+      128,
+      32,
+      192,
+      2048,
+      2048,
+      "",
+      false,
+      false
+    },
+    // WavPack (lossless)
+    {
+      "wavpack",
+      "WavPack",
+      "wavpack",
+      "wv",
+      "wv",
+      0,
+      0,
+      0,
+      4096,
+      4096,
+      "-compression_level 1",
+      true,
+      false
+    },
+    // ADPCM Yamaha (console / synth)
+    {
+      "adpcm_yamaha",
+      "ADPCM Yamaha",
+      "adpcm_yamaha",
+      "wav",
+      "wav",
+      0,
+      0,
+      0,
+      1024,
+      1024,
+      "",
+      true,
       false
     },
   };
