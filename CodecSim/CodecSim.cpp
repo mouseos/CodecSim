@@ -172,6 +172,19 @@ CodecSim::CodecSim(const InstanceInfo& info)
   // Custom bitrate (used when "Other" is selected)
   GetParam(kParamBitrateCustom)->InitInt("Bitrate (Custom)", 128, 8, 640, "kbps");
 
+  // Initialize bitrate presets for the default codec
+  UpdateBitrateForCodec(0);
+
+  // Initialize option values for the default codec
+  {
+    const CodecInfo* defaultInfo = CodecRegistry::Instance().GetAvailableByIndex(0);
+    if (defaultInfo)
+    {
+      for (const auto& opt : defaultInfo->options)
+        mCodecOptionValues[opt.key] = opt.defaultValue;
+    }
+  }
+
   // Sample rate selection
   GetParam(kParamSampleRate)->InitEnum("Sample Rate", 5, kNumSampleRatePresets);
   for (int i = 0; i < kNumSampleRatePresets; i++)
@@ -296,7 +309,8 @@ CodecSim::CodecSim(const InstanceInfo& info)
     // Section: Bitrate
     const IRECT bitrateLabelBounds = IRECT(mainPanelInner.L, yPos, mainPanelInner.R, yPos + Layout::LabelHeight);
     pGraphics->AttachControl(new ITextControl(bitrateLabelBounds, "Bitrate",
-      IText(14.f, Colors::TextGray, "Roboto-Regular", EAlign::Near)));
+      IText(14.f, Colors::TextGray, "Roboto-Regular", EAlign::Near)),
+      kCtrlTagBitrateLabel);
     yPos += Layout::LabelHeight + 5.f;
 
     const IRECT bitrateSelectorBounds = IRECT(mainPanelInner.L, yPos, mainPanelInner.R, yPos + Layout::CodecSelectorHeight);
@@ -335,22 +349,60 @@ CodecSim::CodecSim(const InstanceInfo& info)
     );
 
     //==========================================================================
-    // Detail Settings Panel (Right Side) - FFmpeg Log
+    // Detail Settings Panel (Right Side) - Tabbed: Options / Log
     //==========================================================================
     const IRECT detailPanelBounds = contentArea.GetFromRight(Layout::DetailPanelWidth);
     pGraphics->AttachControl(new IPanelControl(detailPanelBounds, Colors::Panel));
 
     const IRECT detailPanelInner = detailPanelBounds.GetPadded(-Layout::Padding);
 
-    const IRECT detailTitleBounds = IRECT(detailPanelInner.L, detailPanelInner.T,
-                                          detailPanelInner.R, detailPanelInner.T + Layout::LabelHeight);
-    pGraphics->AttachControl(new ITextControl(detailTitleBounds, "FFmpeg Log",
-      IText(16.f, Colors::TextWhite, "Roboto-Regular", EAlign::Center)));
+    // Tab switch at top of panel
+    constexpr float kTabHeight = 28.f;
+    const IRECT tabBounds = IRECT(detailPanelInner.L, detailPanelInner.T,
+                                   detailPanelInner.R, detailPanelInner.T + kTabHeight);
 
-    const IRECT logDisplayBounds = IRECT(detailPanelInner.L, detailPanelInner.T + Layout::LabelHeight + 5.f,
-                                         detailPanelInner.R, detailPanelInner.B);
+    auto* pTabSwitch = new IVTabSwitchControl(tabBounds, kNoParameter,
+      {"Options", "Log"}, "", tabStyle);
+    pTabSwitch->SetValue(1.0); // Default to Log tab
+    pGraphics->AttachControl(pTabSwitch, kCtrlTagDetailTabSwitch);
+
+    // Content area below tabs
+    const IRECT tabContentBounds = IRECT(detailPanelInner.L, detailPanelInner.T + kTabHeight + 5.f,
+                                          detailPanelInner.R, detailPanelInner.B);
+
+    // --- Options tab: pre-allocate 5 label slots ---
+    constexpr float kOptLabelH = 16.f;
+    constexpr float kOptControlH = 28.f;
+    constexpr float kOptSpacing = 6.f;
+    constexpr float kOptBlockH = kOptLabelH + kOptControlH + kOptSpacing;
+
+    for (int i = 0; i < 5; i++)
+    {
+      float yTop = tabContentBounds.T + i * kOptBlockH;
+      IRECT labelBounds(tabContentBounds.L, yTop, tabContentBounds.R, yTop + kOptLabelH);
+      auto* pLabel = new ITextControl(labelBounds, "",
+        IText(11.f, Colors::TextGray, "Roboto-Regular", EAlign::Near));
+      pLabel->Hide(true);
+      pGraphics->AttachControl(pLabel, kCtrlTagOptionLabel0 + i * 2);
+
+      // Placeholder control for each slot (will be dynamically replaced)
+      IRECT ctrlBounds(tabContentBounds.L, yTop + kOptLabelH + 2.f,
+                        tabContentBounds.R, yTop + kOptLabelH + 2.f + kOptControlH);
+      auto* pPlaceholder = new ITextControl(ctrlBounds, "",
+        IText(11.f, Colors::TextGray, "Roboto-Regular"));
+      pPlaceholder->Hide(true);
+      pGraphics->AttachControl(pPlaceholder, kCtrlTagOptionControl0 + i * 2);
+    }
+
+    // "No additional options" text
+    auto* pNoOpts = new ITextControl(tabContentBounds, "No additional options",
+      IText(12.f, Colors::TextGray, "Roboto-Regular", EAlign::Center, EVAlign::Middle));
+    pNoOpts->Hide(true);
+    pGraphics->AttachControl(pNoOpts, kCtrlTagNoOptionsText);
+
+    // --- Log tab ---
     pGraphics->AttachControl(
-      new IMultiLineTextControl(logDisplayBounds, "Press Start to begin...",
+      new IMultiLineTextControl(tabContentBounds, "Press Start to begin...",
         IText(10.f, Colors::TextGray, "Roboto-Regular", EAlign::Near, EVAlign::Top)),
       kCtrlTagLogDisplay
     );
@@ -362,6 +414,9 @@ CodecSim::CodecSim(const InstanceInfo& info)
       new SpinnerOverlayControl(bounds, IColor(120, 0, 0, 0), Colors::AccentBlue, 28.f, 4.f),
       kCtrlTagSpinner
     );
+
+    // Initialize options UI for the default codec
+    UpdateOptionsForCodec(0);
   };
 #endif
 
@@ -385,12 +440,17 @@ CodecSim::~CodecSim()
 }
 
 // Helper: get effective bitrate from preset or custom input
-static int GetEffectiveBitrate(iplug::Plugin* plug)
+int CodecSim::GetEffectiveBitrate()
 {
-  int presetIdx = plug->GetParam(kParamBitrate)->Int();
-  if (presetIdx >= kNumBitratePresets) // "Other"
-    return plug->GetParam(kParamBitrateCustom)->Int();
-  return kBitratePresets[presetIdx];
+  int presetIdx = GetParam(kParamBitrate)->Int();
+  int numPresets = static_cast<int>(mCurrentBitratePresets.size());
+  if (numPresets == 0)
+    return 128; // fallback
+  if (mCurrentCodecHasOther && presetIdx >= numPresets)
+    return GetParam(kParamBitrateCustom)->Int();
+  if (presetIdx < numPresets)
+    return mCurrentBitratePresets[presetIdx];
+  return mCurrentBitratePresets[0];
 }
 
 void CodecSim::OnReset()
@@ -426,15 +486,18 @@ void CodecSim::OnParamChange(int paramIdx)
       const CodecInfo* info = CodecRegistry::Instance().GetAvailableByIndex(mCurrentCodecIndex);
       if (info)
         AddLogMessage("Codec: " + info->displayName + ". Press Start to apply.");
+      UpdateBitrateForCodec(mCurrentCodecIndex);
+      UpdateOptionsForCodec(mCurrentCodecIndex);
     }
     break;
     case kParamBitrate:
     {
       int presetIdx = GetParam(kParamBitrate)->Int();
-      if (presetIdx < kNumBitratePresets)
-        AddLogMessage("Bitrate: " + std::to_string(kBitratePresets[presetIdx]) + " kbps. Press Start to apply.");
-      else
+      int numPresets = static_cast<int>(mCurrentBitratePresets.size());
+      if (mCurrentCodecHasOther && presetIdx >= numPresets)
         AddLogMessage("Bitrate: Other (custom). Press Start to apply.");
+      else if (presetIdx < numPresets)
+        AddLogMessage("Bitrate: " + std::to_string(mCurrentBitratePresets[presetIdx]) + " kbps. Press Start to apply.");
     }
     break;
     case kParamBitrateCustom:
@@ -520,12 +583,28 @@ void CodecSim::OnIdle()
         dynamic_cast<SpinnerOverlayControl*>(pSpinner)->StopSpinning();
     }
 
-    // Show/hide custom bitrate input based on "Other" selection; also disable when running
+    // Handle detail panel tab switching
+    if (IControl* pTabSwitch = GetUI()->GetControlWithTag(kCtrlTagDetailTabSwitch))
+    {
+      int tabIdx = static_cast<int>(pTabSwitch->GetValue() * 1.0 + 0.5); // 0=Options, 1=Log
+      if (tabIdx != mDetailTabIndex)
+        SetDetailTab(tabIdx);
+    }
+
+    // Hide/show bitrate controls based on codec type
+    bool hideBitrate = mCurrentCodecIsLossless;
+    if (IControl* pBitrateLabel = GetUI()->GetControlWithTag(kCtrlTagBitrateLabel))
+      pBitrateLabel->Hide(hideBitrate);
+    if (IControl* pBitrate = GetUI()->GetControlWithTag(kCtrlTagBitrateSelector))
+      pBitrate->Hide(hideBitrate);
+
+    // Show/hide custom bitrate input
     if (IControl* pCustomBitrate = GetUI()->GetControlWithTag(kCtrlTagBitrateCustom))
     {
-      bool isOther = (GetParam(kParamBitrate)->Int() >= kNumBitratePresets);
-      pCustomBitrate->Hide(!isOther);
-      pCustomBitrate->SetDisabled(!isOther || isRunning);
+      int numPresets = static_cast<int>(mCurrentBitratePresets.size());
+      bool isOther = mCurrentCodecHasOther && (GetParam(kParamBitrate)->Int() >= numPresets);
+      pCustomBitrate->Hide(hideBitrate || !isOther);
+      pCustomBitrate->SetDisabled(hideBitrate || !isOther || isRunning);
     }
 
     if (IControl* pLogCtrl = GetUI()->GetControlWithTag(kCtrlTagLogDisplay))
@@ -626,9 +705,12 @@ void CodecSim::InitializeCodec(int codecIndex)
   });
 
   // Set bitrate from UI
-  int bitrateKbps = GetEffectiveBitrate(this);
+  int bitrateKbps = GetEffectiveBitrate();
   if (!codecInfo->isLossless)
     processor->SetBitrate(bitrateKbps);
+
+  // Apply codec-specific options
+  processor->SetAdditionalArgs(BuildCurrentAdditionalArgs());
 
   // Initialize (launches ffmpeg processes)
   if (processor->Initialize(mSampleRate, mNumChannels))
@@ -665,6 +747,357 @@ void CodecSim::StopCodec()
   }
 
   AddLogMessage("Codec stopped.");
+}
+
+void CodecSim::UpdateBitrateForCodec(int codecIndex)
+{
+  const CodecInfo* info = CodecRegistry::Instance().GetAvailableByIndex(codecIndex);
+  if (!info) return;
+
+  mCurrentBitratePresets.clear();
+  mCurrentCodecIsLossless = info->isLossless;
+  mCurrentCodecHasOther = false;
+
+  if (info->isLossless)
+  {
+    // Lossless codec: no bitrate control needed
+    // UI hiding handled in OnIdle
+    DebugLogCodecSim("UpdateBitrateForCodec: " + info->displayName + " is lossless, hiding bitrate");
+  }
+  else if (info->minBitrate == info->maxBitrate)
+  {
+    // Fixed bitrate: single option only
+    mCurrentBitratePresets.push_back(info->minBitrate);
+    DebugLogCodecSim("UpdateBitrateForCodec: " + info->displayName + " fixed at " + std::to_string(info->minBitrate) + " kbps");
+  }
+  else
+  {
+    // Variable bitrate: filter global presets to valid range
+    for (int i = 0; i < kNumBitratePresets; i++)
+    {
+      if (kBitratePresets[i] >= info->minBitrate && kBitratePresets[i] <= info->maxBitrate)
+        mCurrentBitratePresets.push_back(kBitratePresets[i]);
+    }
+    // Ensure default bitrate is in the list
+    bool hasDefault = false;
+    for (int bp : mCurrentBitratePresets)
+    {
+      if (bp == info->defaultBitrate) { hasDefault = true; break; }
+    }
+    if (!hasDefault && info->defaultBitrate > 0)
+    {
+      mCurrentBitratePresets.push_back(info->defaultBitrate);
+      std::sort(mCurrentBitratePresets.begin(), mCurrentBitratePresets.end());
+    }
+    mCurrentCodecHasOther = true;
+    DebugLogCodecSim("UpdateBitrateForCodec: " + info->displayName + " range " +
+                     std::to_string(info->minBitrate) + "-" + std::to_string(info->maxBitrate) +
+                     " kbps, " + std::to_string(mCurrentBitratePresets.size()) + " presets");
+  }
+
+  // Update the bitrate parameter
+  IParam* pBitrate = GetParam(kParamBitrate);
+  pBitrate->ClearDisplayTexts();
+
+  int numPresets = static_cast<int>(mCurrentBitratePresets.size());
+  int totalEntries = mCurrentCodecHasOther ? numPresets + 1 : std::max(numPresets, 1);
+
+  // Find default preset index
+  int defaultIdx = 0;
+  for (int i = 0; i < numPresets; i++)
+  {
+    if (mCurrentBitratePresets[i] == info->defaultBitrate)
+    {
+      defaultIdx = i;
+      break;
+    }
+  }
+
+  if (mCurrentCodecIsLossless)
+  {
+    // For lossless: single dummy entry (UI will be hidden anyway)
+    pBitrate->InitEnum("Bitrate", 0, 1);
+    pBitrate->SetDisplayText(0, "N/A");
+  }
+  else
+  {
+    pBitrate->InitEnum("Bitrate", defaultIdx, totalEntries);
+    for (int i = 0; i < numPresets; i++)
+    {
+      char label[32];
+      snprintf(label, sizeof(label), "%d kbps", mCurrentBitratePresets[i]);
+      pBitrate->SetDisplayText(i, label);
+    }
+    if (mCurrentCodecHasOther)
+      pBitrate->SetDisplayText(numPresets, "Other");
+  }
+
+  // Update custom bitrate range
+  if (!info->isLossless)
+  {
+    GetParam(kParamBitrateCustom)->InitInt("Bitrate (Custom)",
+      info->defaultBitrate, info->minBitrate, info->maxBitrate, "kbps");
+  }
+
+  // Refresh UI controls - force IVMenuButtonControl to update its button text
+  if (GetUI())
+  {
+    if (IControl* pCtrl = GetUI()->GetControlWithTag(kCtrlTagBitrateSelector))
+    {
+      double normVal = pBitrate->ToNormalized(static_cast<double>(defaultIdx));
+      // SetValueFromUserInput has an equality guard, so set a different value first
+      pCtrl->SetValue(1.0 - normVal, 0);
+      pCtrl->SetValueFromUserInput(normVal, 0);
+    }
+  }
+}
+
+void CodecSim::SetDetailTab(int tabIndex)
+{
+  mDetailTabIndex = tabIndex;
+  if (!GetUI()) return;
+
+  bool showOptions = (tabIndex == 0);
+  bool showLog = (tabIndex == 1);
+
+  // Get current codec options count
+  const CodecInfo* info = CodecRegistry::Instance().GetAvailableByIndex(mCurrentCodecIndex);
+  int numOptions = info ? static_cast<int>(info->options.size()) : 0;
+
+  // Show/hide option labels and controls
+  for (int i = 0; i < 5; i++)
+  {
+    bool showSlot = showOptions && (i < numOptions);
+    if (IControl* p = GetUI()->GetControlWithTag(kCtrlTagOptionLabel0 + i * 2))
+      p->Hide(!showSlot);
+    if (IControl* p = GetUI()->GetControlWithTag(kCtrlTagOptionControl0 + i * 2))
+      p->Hide(!showSlot);
+  }
+
+  // Show "no options" text if Options tab and zero options
+  if (IControl* p = GetUI()->GetControlWithTag(kCtrlTagNoOptionsText))
+    p->Hide(!showOptions || numOptions > 0);
+
+  // Show/hide log
+  if (IControl* p = GetUI()->GetControlWithTag(kCtrlTagLogDisplay))
+    p->Hide(!showLog);
+}
+
+void CodecSim::UpdateOptionsForCodec(int codecIndex)
+{
+  const CodecInfo* info = CodecRegistry::Instance().GetAvailableByIndex(codecIndex);
+  if (!info) return;
+
+  // Reset option values to defaults
+  mCodecOptionValues.clear();
+  for (const auto& opt : info->options)
+    mCodecOptionValues[opt.key] = opt.defaultValue;
+
+  if (!GetUI()) return;
+  IGraphics* pGraphics = GetUI();
+
+  // Calculate content bounds (same as layout)
+  const IRECT bounds = pGraphics->GetBounds();
+  const IRECT contentArea = bounds.GetReducedFromTop(Layout::TitleBarHeight).GetPadded(-Layout::Padding);
+  const IRECT detailPanelBounds = contentArea.GetFromRight(Layout::DetailPanelWidth);
+  const IRECT detailPanelInner = detailPanelBounds.GetPadded(-Layout::Padding);
+  constexpr float kTabHeight = 28.f;
+  const IRECT tabContentBounds = IRECT(detailPanelInner.L, detailPanelInner.T + kTabHeight + 5.f,
+                                        detailPanelInner.R, detailPanelInner.B);
+  constexpr float kOptLabelH = 16.f;
+  constexpr float kOptControlH = 28.f;
+  constexpr float kOptSpacing = 6.f;
+  constexpr float kOptBlockH = kOptLabelH + kOptControlH + kOptSpacing;
+
+  int numOptions = static_cast<int>(info->options.size());
+  if (numOptions > 5) numOptions = 5;
+
+  for (int i = 0; i < 5; i++)
+  {
+    int labelTag = kCtrlTagOptionLabel0 + i * 2;
+    int ctrlTag = kCtrlTagOptionControl0 + i * 2;
+
+    if (i < numOptions)
+    {
+      const auto& opt = info->options[i];
+
+      // Update label text
+      if (IControl* pLabel = pGraphics->GetControlWithTag(labelTag))
+        pLabel->As<ITextControl>()->SetStr(opt.label.c_str());
+
+      // Remove old control and create new one
+      // For compound controls (IContainerBase like IVNumberBoxControl),
+      // children must be removed first or they remain as orphans in IGraphics
+      if (IControl* pOld = pGraphics->GetControlWithTag(ctrlTag))
+      {
+        if (auto* pContainer = dynamic_cast<IContainerBase*>(pOld))
+        {
+          while (pContainer->NChildren() > 0)
+            pContainer->RemoveChildControl(pContainer->GetChild(pContainer->NChildren() - 1));
+        }
+        pGraphics->RemoveControl(pOld);
+      }
+
+      float yTop = tabContentBounds.T + i * kOptBlockH;
+      IRECT ctrlBounds(tabContentBounds.L, yTop + kOptLabelH + 2.f,
+                        tabContentBounds.R, yTop + kOptLabelH + 2.f + kOptControlH);
+
+      // Build the style inline (need tabStyle equivalent)
+      const IVStyle optStyle = IVStyle({
+        IColor(255, 55, 55, 55),
+        IColor(255, 75, 75, 75),
+        IColor(255, 100, 180, 255),
+        IColor(255, 90, 90, 90),
+        IColor(255, 100, 100, 100),
+        IColor(255, 30, 30, 30),
+        IColor(255, 255, 255, 255),
+        IColor(255, 255, 255, 255),
+        IColor(255, 255, 255, 255)
+      }).WithLabelText(IText(11.f, IColor(255, 255, 255, 255), "Roboto-Regular"))
+        .WithValueText(IText(11.f, IColor(255, 255, 255, 255), "Roboto-Regular"))
+        .WithDrawFrame(true)
+        .WithRoundness(0.1f);
+
+      IControl* pNewCtrl = nullptr;
+
+      switch (opt.type)
+      {
+        case CodecOptionType::Toggle:
+        {
+          auto* pToggle = new IVToggleControl(ctrlBounds, kNoParameter, "", optStyle, "Off", "On");
+          pToggle->SetValue(opt.defaultValue != 0 ? 1.0 : 0.0);
+          pToggle->SetActionFunction([this, key = opt.key](IControl* pCaller) {
+            mCodecOptionValues[key] = pCaller->GetValue() > 0.5 ? 1 : 0;
+          });
+          pNewCtrl = pToggle;
+          break;
+        }
+        case CodecOptionType::Choice:
+        {
+          if (static_cast<int>(opt.choices.size()) <= 4)
+          {
+            // Tab switch for few choices
+            std::vector<const char*> labels;
+            for (const auto& c : opt.choices)
+              labels.push_back(c.label.c_str());
+
+            auto* pTabs = new IVTabSwitchControl(ctrlBounds, kNoParameter, labels, "", optStyle);
+            if (!opt.choices.empty())
+              pTabs->SetValue(static_cast<double>(opt.defaultValue) / static_cast<double>(std::max(1, (int)opt.choices.size() - 1)));
+            pTabs->SetActionFunction([this, key = opt.key](IControl* pCaller) {
+              mCodecOptionValues[key] = pCaller->As<ISwitchControlBase>()->GetSelectedIdx();
+            });
+            pNewCtrl = pTabs;
+          }
+          else
+          {
+            // Dropdown menu for many choices (IVButtonControl + IPopupMenu)
+            auto choices = opt.choices;
+            std::string defaultLabel = (opt.defaultValue >= 0 && opt.defaultValue < static_cast<int>(choices.size()))
+              ? choices[opt.defaultValue].label : choices[0].label;
+
+            auto* pButton = new IVButtonControl(ctrlBounds,
+              [this, key = opt.key, choices](IControl* pCaller) {
+                IPopupMenu menu;
+                for (const auto& c : choices)
+                  menu.AddItem(new IPopupMenu::Item(c.label.c_str()));
+
+                menu.SetFunction([this, key, pCaller](IPopupMenu* pMenu) {
+                  int idx = pMenu->GetChosenItemIdx();
+                  if (idx >= 0) {
+                    mCodecOptionValues[key] = idx;
+                    pCaller->As<IVectorBase>()->SetLabelStr(pMenu->GetChosenItem()->GetText());
+                    pCaller->SetDirty(false);
+                  }
+                });
+
+                pCaller->GetUI()->CreatePopupMenu(*pCaller, menu, pCaller->GetRECT());
+              },
+              defaultLabel.c_str(), optStyle, true, false);
+            pNewCtrl = pButton;
+          }
+          break;
+        }
+        case CodecOptionType::IntRange:
+        {
+          const IVStyle numStyle = IVStyle({
+            IColor(255, 45, 45, 45),
+            IColor(255, 70, 70, 70),
+            IColor(255, 100, 180, 255),
+            IColor(255, 90, 90, 90),
+            IColor(255, 130, 200, 255),
+            IColor(255, 30, 30, 30),
+            IColor(255, 255, 255, 255),
+            IColor(255, 255, 255, 255),
+            IColor(255, 255, 255, 255)
+          }).WithLabelText(IText(11.f, IColor(255, 255, 255, 255), "Roboto-Regular"))
+            .WithValueText(IText(11.f, IColor(255, 255, 255, 255), "Roboto-Regular"))
+            .WithDrawFrame(true)
+            .WithRoundness(0.2f);
+
+          auto* pNum = new IVNumberBoxControl(ctrlBounds, kNoParameter, nullptr, "", numStyle,
+            true, opt.defaultValue, opt.minValue, opt.maxValue);
+          pNum->SetActionFunction([this, key = opt.key](IControl* pCaller) {
+            double normVal = pCaller->GetValue();
+            auto* pNB = pCaller->As<IVNumberBoxControl>();
+            // Map normalized value back to integer range
+            int minV = static_cast<int>(pNB->GetRealValue()); // approximate
+            mCodecOptionValues[key] = minV;
+          });
+          pNewCtrl = pNum;
+          break;
+        }
+      }
+
+      if (pNewCtrl)
+      {
+        bool showSlot = (mDetailTabIndex == 0);
+        pNewCtrl->Hide(!showSlot);
+        pGraphics->AttachControl(pNewCtrl, ctrlTag);
+      }
+    }
+    else
+    {
+      // Hide unused slots
+      if (IControl* pLabel = pGraphics->GetControlWithTag(labelTag))
+        pLabel->Hide(true);
+      if (IControl* pCtrl = pGraphics->GetControlWithTag(ctrlTag))
+        pCtrl->Hide(true);
+    }
+  }
+
+  // Update tab visibility
+  SetDetailTab(mDetailTabIndex);
+}
+
+std::string CodecSim::BuildCurrentAdditionalArgs()
+{
+  const CodecInfo* info = CodecRegistry::Instance().GetAvailableByIndex(mCurrentCodecIndex);
+  if (!info) return "";
+
+  std::string result = info->additionalArgs;
+
+  for (const auto& opt : info->options)
+  {
+    auto it = mCodecOptionValues.find(opt.key);
+    int val = (it != mCodecOptionValues.end()) ? it->second : opt.defaultValue;
+
+    switch (opt.type)
+    {
+      case CodecOptionType::Toggle:
+        result += " " + opt.argName + " " + std::to_string(val);
+        break;
+      case CodecOptionType::Choice:
+        if (val >= 0 && val < static_cast<int>(opt.choices.size()) && !opt.choices[val].argValue.empty())
+          result += " " + opt.argName + " " + opt.choices[val].argValue;
+        break;
+      case CodecOptionType::IntRange:
+        result += " " + opt.argName + " " + std::to_string(val);
+        break;
+    }
+  }
+
+  return result;
 }
 
 void CodecSim::AddLogMessage(const std::string& msg)

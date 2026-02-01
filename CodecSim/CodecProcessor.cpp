@@ -206,3 +206,9 @@ void GenericCodecProcessor::SetSampleRate(int sampleRate)
     Initialize(mSampleRate, savedCh);
   }
 }
+
+void GenericCodecProcessor::SetAdditionalArgs(const std::string& args)
+{
+  std::lock_guard<std::recursive_mutex> lock(mMutex);
+  mCodecInfo.additionalArgs = args;
+}

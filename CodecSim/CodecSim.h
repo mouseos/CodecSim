@@ -2,6 +2,7 @@
 
 #include "IPlug_include_in_plug_hdr.h"
 #include <vector>
+#include <map>
 #include <memory>
 #include <atomic>
 #include <mutex>
@@ -33,6 +34,7 @@ enum ECtrlTags
   kCtrlTagTitle,
 
   kCtrlTagCodecSelector,
+  kCtrlTagBitrateLabel,
   kCtrlTagBitrateSelector,
   kCtrlTagBitrateCustom,
   kCtrlTagSampleRateSelector,
@@ -41,6 +43,23 @@ enum ECtrlTags
   kCtrlTagStatusDisplay,
   kCtrlTagLogDisplay,
   kCtrlTagSpinner,
+
+  // Right panel tab system
+  kCtrlTagDetailTabSwitch,
+
+  // Options tab: 5 label+control slots
+  kCtrlTagOptionLabel0,
+  kCtrlTagOptionControl0,
+  kCtrlTagOptionLabel1,
+  kCtrlTagOptionControl1,
+  kCtrlTagOptionLabel2,
+  kCtrlTagOptionControl2,
+  kCtrlTagOptionLabel3,
+  kCtrlTagOptionControl3,
+  kCtrlTagOptionLabel4,
+  kCtrlTagOptionControl4,
+
+  kCtrlTagNoOptionsText,
 
   kNumCtrlTags
 };
@@ -117,6 +136,20 @@ private:
   void InitializeCodec(int codecIndex);
   void StopCodec();
   void AddLogMessage(const std::string& msg);
+  void UpdateBitrateForCodec(int codecIndex);
+  int GetEffectiveBitrate();
+  void UpdateOptionsForCodec(int codecIndex);
+  void SetDetailTab(int tabIndex);
+  std::string BuildCurrentAdditionalArgs();
+
+  // Dynamic bitrate presets for current codec
+  std::vector<int> mCurrentBitratePresets;
+  bool mCurrentCodecIsLossless = false;
+  bool mCurrentCodecHasOther = false; // true if "Other" (custom) option is available
+
+  // Codec option values and tab state
+  std::map<std::string, int> mCodecOptionValues;
+  int mDetailTabIndex = 1; // 0=Options, 1=Log (default to Log)
 
   // Thread safety
   std::recursive_mutex mCodecMutex;

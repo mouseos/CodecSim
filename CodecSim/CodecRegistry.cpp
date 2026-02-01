@@ -54,7 +54,15 @@ void CodecRegistry::RegisterBuiltinCodecs()
       576,                // latencySamples
       "",                 // additionalArgs
       false,              // isLossless
-      false               // available (detected later)
+      false,              // available (detected later)
+      // options
+      {
+        {"mp3_channel", "Channel Mode", "-joint_stereo", CodecOptionType::Choice, 0, 0, 0,
+          {{"Joint Stereo", "1"}, {"Stereo", "0"}}},
+        {"mp3_abr", "ABR Mode", "-abr", CodecOptionType::Toggle, 0, 0, 1, {}},
+        {"mp3_vbr", "VBR Quality", "-q:a", CodecOptionType::Choice, 0, 0, 0,
+          {{"Off (CBR)", ""}, {"Extreme (~245k)", "0"}, {"Standard (~190k)", "2"}, {"Medium (~165k)", "4"}, {"Low (~115k)", "6"}, {"Minimum (~65k)", "9"}}},
+      }
     },
     // AAC (LC)
     {
@@ -70,7 +78,11 @@ void CodecRegistry::RegisterBuiltinCodecs()
       2048,
       "",
       false,
-      false
+      false,
+      {
+        {"aac_coder", "Coder", "-aac_coder", CodecOptionType::Choice, 0, 0, 0,
+          {{"Two-loop", "twoloop"}, {"Fast", "fast"}}},
+      }
     },
     // HE-AAC (libfdk_aac)
     {
@@ -86,7 +98,11 @@ void CodecRegistry::RegisterBuiltinCodecs()
       2048,
       "-profile:a aac_he -afterburner 1",
       false,
-      false
+      false,
+      {
+        {"heaac_vbr", "VBR Mode", "-vbr", CodecOptionType::Choice, 0, 0, 0,
+          {{"CBR", "0"}, {"VBR 1", "1"}, {"VBR 2", "2"}, {"VBR 3", "3"}, {"VBR 4", "4"}, {"VBR 5", "5"}}},
+      }
     },
     // Opus
     {
@@ -102,7 +118,13 @@ void CodecRegistry::RegisterBuiltinCodecs()
       312,
       "",
       false,
-      false
+      false,
+      {
+        {"opus_app", "Application", "-application", CodecOptionType::Choice, 1, 0, 0,
+          {{"VoIP", "voip"}, {"Audio", "audio"}, {"Low Delay", "lowdelay"}}},
+        {"opus_vbr", "VBR Mode", "-vbr", CodecOptionType::Choice, 1, 0, 0,
+          {{"Off", "off"}, {"On", "on"}, {"Constrained", "constrained"}}},
+      }
     },
     // Vorbis
     {
@@ -134,7 +156,10 @@ void CodecRegistry::RegisterBuiltinCodecs()
       1536,
       "",
       false,
-      false
+      false,
+      {
+        {"ac3_dialnorm", "Dialogue Norm", "-dialnorm", CodecOptionType::IntRange, -31, -31, -1, {}},
+      }
     },
     // E-AC-3
     {
@@ -166,7 +191,10 @@ void CodecRegistry::RegisterBuiltinCodecs()
       4096,
       "",
       true,
-      false
+      false,
+      {
+        {"flac_compression", "Compression", "-compression_level", CodecOptionType::IntRange, 5, 0, 12, {}},
+      }
     },
     // MP2
     {
@@ -182,7 +210,11 @@ void CodecRegistry::RegisterBuiltinCodecs()
       576,
       "",
       false,
-      false
+      false,
+      {
+        {"mp2_mode", "Stereo Mode", "-mode", CodecOptionType::Choice, 0, 0, 0,
+          {{"Auto", "auto"}, {"Stereo", "stereo"}, {"Joint", "joint_stereo"}, {"Mono", "mono"}}},
+      }
     },
     // WMA v2
     {
@@ -246,7 +278,11 @@ void CodecRegistry::RegisterBuiltinCodecs()
       320,
       "",
       false,
-      false
+      false,
+      {
+        {"speex_quality", "CBR Quality", "-cbr_quality", CodecOptionType::IntRange, 8, 0, 10, {}},
+        {"speex_vad", "VAD", "-vad", CodecOptionType::Toggle, 0, 0, 1, {}},
+      }
     },
     // GSM 06.10 (8kHz mono only)
     {
@@ -268,6 +304,7 @@ void CodecRegistry::RegisterBuiltinCodecs()
     // Tier 1: Bluetooth / Mobile / Surround
     //==========================================================================
     // AMR-NB (mobile phone call codec, 3GPP, 8kHz mono only)
+    // Discrete modes: 4.75/5.15/5.90/6.70/7.40/7.95/10.20/12.20 kbps
     {
       "amrnb",
       "AMR-NB",
@@ -275,15 +312,16 @@ void CodecRegistry::RegisterBuiltinCodecs()
       "amr",
       "amr",
       12,
-      5,
+      12,
       12,
       160,
       160,
-      "-ar 8000 -ac 1",
+      "-ar 8000 -ac 1 -b:a 12200",
       false,
       false
     },
     // AMR-WB (HD Voice / VoLTE, 3GPP, 16kHz mono only)
+    // Discrete modes: 6.60/8.85/12.65/14.25/15.85/18.25/19.85/23.05/23.85 kbps
     {
       "amrwb",
       "AMR-WB",
@@ -291,11 +329,11 @@ void CodecRegistry::RegisterBuiltinCodecs()
       "amr",
       "amr",
       24,
-      7,
+      24,
       24,
       320,
       320,
-      "-ar 16000 -ac 1",
+      "-ar 16000 -ac 1 -b:a 23850",
       false,
       false
     },
@@ -380,7 +418,11 @@ void CodecRegistry::RegisterBuiltinCodecs()
       160,
       "-ar 8000 -ac 1",
       false,
-      false
+      false,
+      {
+        {"ilbc_mode", "Frame Mode", "-mode", CodecOptionType::Choice, 1, 0, 0,
+          {{"20ms", "20"}, {"30ms", "30"}}},
+      }
     },
     // G.723.1 (ultra-low bitrate telephony, 8kHz mono, 6.3/5.3 kbps only)
     {
@@ -428,7 +470,11 @@ void CodecRegistry::RegisterBuiltinCodecs()
       160,
       "-ar 8000 -ac 1",
       false,
-      false
+      false,
+      {
+        {"g726_code", "Code Size", "-code_size", CodecOptionType::Choice, 2, 0, 0,
+          {{"2 (16k)", "2"}, {"3 (24k)", "3"}, {"4 (32k)", "4"}, {"5 (40k)", "5"}}},
+      }
     },
     // ADPCM IMA WAV (game audio, fixed 4:1 ratio)
     {
@@ -541,9 +587,12 @@ void CodecRegistry::RegisterBuiltinCodecs()
       0,
       4096,
       4096,
-      "-compression_level 1",
+      "",
       true,
-      false
+      false,
+      {
+        {"wavpack_comp", "Compression", "-compression_level", CodecOptionType::IntRange, 1, 0, 8, {}},
+      }
     },
     // ADPCM Yamaha (console / synth)
     {

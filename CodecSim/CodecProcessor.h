@@ -41,6 +41,7 @@ public:
   // Configuration
   void SetBitrate(int bitrateKbps);
   void SetSampleRate(int sampleRate);
+  void SetAdditionalArgs(const std::string& args);
 
   const CodecInfo& GetCodecInfo() const { return mCodecInfo; }
 

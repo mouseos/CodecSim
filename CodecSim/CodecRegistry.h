@@ -8,6 +8,34 @@
 #include <vector>
 #include <mutex>
 //==============================================================================
+// CodecOptionDef - describes a configurable codec option
+//==============================================================================
+enum class CodecOptionType
+{
+  Toggle,      // bool: on/off
+  Choice,      // enum: dropdown/tab switch
+  IntRange     // integer range: number box
+};
+
+struct CodecOptionChoice
+{
+  std::string label;    // Display text: "VoIP", "Audio", etc.
+  std::string argValue; // ffmpeg arg value: "voip", "audio", etc.
+};
+
+struct CodecOptionDef
+{
+  std::string key;                        // Unique identifier
+  std::string label;                      // UI display label
+  std::string argName;                    // ffmpeg arg name (e.g., "-application")
+  CodecOptionType type;
+  int defaultValue;                       // Default index (Choice/Toggle) or int value (IntRange)
+  int minValue;                           // For IntRange only
+  int maxValue;                           // For IntRange only
+  std::vector<CodecOptionChoice> choices; // For Choice type only
+};
+
+//==============================================================================
 // CodecInfo - describes a single codec configuration
 //==============================================================================
 struct CodecInfo
@@ -25,6 +53,7 @@ struct CodecInfo
   std::string additionalArgs; // Extra ffmpeg encoder arguments
   bool isLossless;            // If true, bitrate control is disabled
   bool available;             // Detected at runtime via ffmpeg -encoders
+  std::vector<CodecOptionDef> options;    // Codec-specific configurable options
 };
 //==============================================================================
 // CodecRegistry - singleton registry of all supported codecs
