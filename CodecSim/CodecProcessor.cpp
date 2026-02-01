@@ -207,6 +207,12 @@ void GenericCodecProcessor::SetSampleRate(int sampleRate)
   }
 }
 
+bool GenericCodecProcessor::HasFirstAudioArrived() const
+{
+  std::lock_guard<std::recursive_mutex> lock(mMutex);
+  return mPipeManager && mPipeManager->HasFirstAudioArrived();
+}
+
 void GenericCodecProcessor::SetAdditionalArgs(const std::string& args)
 {
   std::lock_guard<std::recursive_mutex> lock(mMutex);

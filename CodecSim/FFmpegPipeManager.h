@@ -116,6 +116,12 @@ public:
   size_t AvailableOutputSamples() const;
 
   /**
+   * Check if the first decoded audio output has been received
+   * @return true if at least one decoded sample has arrived
+   */
+  bool HasFirstAudioArrived() const { return mFirstOutputReceived.load(std::memory_order_relaxed); }
+
+  /**
    * Flush input buffer and wait for output
    */
   void Flush();
@@ -261,6 +267,7 @@ private:
 
   // State
   std::atomic<bool> mIsRunning;
+  std::atomic<bool> mFirstOutputReceived{false};
   std::string mLastError;
   size_t mLatencySamples;
 

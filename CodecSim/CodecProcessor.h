@@ -43,6 +43,7 @@ public:
   void SetSampleRate(int sampleRate);
   void SetAdditionalArgs(const std::string& args);
 
+  bool HasFirstAudioArrived() const;
   const CodecInfo& GetCodecInfo() const { return mCodecInfo; }
 
 private:

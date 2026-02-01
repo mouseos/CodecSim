@@ -85,6 +85,7 @@ bool FFmpegPipeManager::Start(const Config& config)
   }
 
   // Start background threads
+  mFirstOutputReceived.store(false, std::memory_order_relaxed);
   mIsRunning = true;
   mErrorThread = std::thread(&FFmpegPipeManager::ErrorReadThread, this);
   mOutputThread = std::thread(&FFmpegPipeManager::OutputReadThread, this);
@@ -657,6 +658,10 @@ void FFmpegPipeManager::OutputReadThread()
       {
         mOutputFloatBuffer.push(sample);
       }
+
+      // Signal first audio arrival
+      if (!mFirstOutputReceived.load(std::memory_order_relaxed))
+        mFirstOutputReceived.store(true, std::memory_order_relaxed);
 
       // Remove processed bytes
       mOutputRawBuffer.erase(mOutputRawBuffer.begin(),

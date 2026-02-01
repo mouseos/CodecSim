@@ -2,6 +2,8 @@
 #include "IPlug_include_in_plug_src.h"
 #include "CodecProcessor.h"
 #include "CodecRegistry.h"
+#include <chrono>
+#include <cstdlib>
 
 #if IPLUG_EDITOR
 #include "IControls.h"
@@ -53,7 +55,7 @@ namespace Layout
   constexpr float SliderHeight = 30.f;
   constexpr float LabelHeight = 20.f;
   constexpr float ControlSpacing = 15.f;
-  constexpr float SectionSpacing = 25.f;
+  constexpr float SectionSpacing = 18.f;
   constexpr float CodecSelectorHeight = 35.f;
 }
 
@@ -130,6 +132,70 @@ private:
 };
 
 //==============================================================================
+// Dropdown Arrow Overlay (draws a small ▼ triangle, transparent and non-interactive)
+//==============================================================================
+class DropdownArrowControl : public IControl
+{
+public:
+  DropdownArrowControl(const IRECT& bounds, const IColor& color = IColor(180, 200, 200, 200))
+    : IControl(bounds)
+    , mColor(color)
+  {
+    mIgnoreMouse = true;
+  }
+
+  void Draw(IGraphics& g) override
+  {
+    float cx = mRECT.MW();
+    float cy = mRECT.MH();
+    float hw = 4.f;
+    float hh = 3.f;
+    g.FillTriangle(mColor, cx - hw, cy - hh, cx + hw, cy - hh, cx, cy + hh);
+  }
+
+private:
+  IColor mColor;
+};
+
+//==============================================================================
+// Status Panel (Enabled/Disabled indicator with dynamic color)
+//==============================================================================
+class StatusPanelControl : public IControl
+{
+public:
+  StatusPanelControl(const IRECT& bounds)
+    : IControl(bounds)
+  {
+    mIgnoreMouse = true;
+  }
+
+  void Draw(IGraphics& g) override
+  {
+    IColor bgColor = mEnabled
+      ? IColor(255, 25, 80, 45)
+      : IColor(255, 50, 50, 50);
+    g.FillRoundRect(bgColor, mRECT, 4.f);
+
+    IColor textColor = mEnabled
+      ? IColor(255, 100, 230, 120)
+      : IColor(255, 140, 140, 140);
+
+    const char* label = mEnabled ? "Enabled" : "Disabled";
+    IText textStyle(11.f, textColor, "Roboto-Regular", EAlign::Center, EVAlign::Middle);
+    IRECT textBounds = mRECT.GetFromTop(14.f).GetTranslated(0.f, 2.f);
+    g.DrawText(textStyle, label, textBounds);
+  }
+
+  void SetEnabled(bool enabled)
+  {
+    if (mEnabled != enabled) { mEnabled = enabled; SetDirty(false); }
+  }
+
+private:
+  bool mEnabled = false;
+};
+
+//==============================================================================
 // Constructor
 //==============================================================================
 CodecSim::CodecSim(const InstanceInfo& info)
@@ -154,12 +220,13 @@ CodecSim::CodecSim(const InstanceInfo& info)
     numAvailable = 1;
   }
 
-  // Initialize codec selection parameter
+  // Initialize codec selection parameter with defaults
+  mCurrentCodecIndex = 0;
   GetParam(kParamCodec)->InitEnum("Codec", 0, numAvailable);
   for (int i = 0; i < static_cast<int>(availableCodecs.size()); i++)
     GetParam(kParamCodec)->SetDisplayText(i, availableCodecs[i]->displayName.c_str());
 
-  // Bitrate preset selector
+  // Bitrate preset selector (temporary init, will be re-initialized by UpdateBitrateForCodec)
   GetParam(kParamBitrate)->InitEnum("Bitrate", 4, kNumBitratePresets + 1);
   for (int i = 0; i < kNumBitratePresets; i++)
   {
@@ -169,21 +236,11 @@ CodecSim::CodecSim(const InstanceInfo& info)
   }
   GetParam(kParamBitrate)->SetDisplayText(kNumBitratePresets, "Other");
 
-  // Custom bitrate (used when "Other" is selected)
+  // Custom bitrate
   GetParam(kParamBitrateCustom)->InitInt("Bitrate (Custom)", 128, 8, 640, "kbps");
 
-  // Initialize bitrate presets for the default codec
+  // Initialize bitrate presets for default codec
   UpdateBitrateForCodec(0);
-
-  // Initialize option values for the default codec
-  {
-    const CodecInfo* defaultInfo = CodecRegistry::Instance().GetAvailableByIndex(0);
-    if (defaultInfo)
-    {
-      for (const auto& opt : defaultInfo->options)
-        mCodecOptionValues[opt.key] = opt.defaultValue;
-    }
-  }
 
   // Sample rate selection
   GetParam(kParamSampleRate)->InitEnum("Sample Rate", 5, kNumSampleRatePresets);
@@ -197,8 +254,11 @@ CodecSim::CodecSim(const InstanceInfo& info)
     GetParam(kParamSampleRate)->SetDisplayText(i, label);
   }
 
-  // Start/Stop toggle
+  // Start/Stop toggle (always start disabled)
   GetParam(kParamEnabled)->InitBool("Enabled", false);
+
+  // Load standalone state (for VST3 the host handles state via SerializeState/UnserializeState)
+  LoadStandaloneState();
 
 #if IPLUG_EDITOR
   mMakeGraphicsFunc = [&]() {
@@ -249,6 +309,22 @@ CodecSim::CodecSim(const InstanceInfo& info)
       .WithDrawFrame(true)
       .WithRoundness(0.1f);
 
+    // Selector/dropdown style - "input field" look (distinct from action buttons)
+    const IVStyle selectorStyle = IVStyle({
+      IColor(255, 38, 38, 38),        // kBG - slightly recessed
+      IColor(255, 50, 50, 50),        // kFG - hover
+      IColor(255, 100, 180, 255),     // kPR - accent on press
+      IColor(255, 65, 65, 65),        // kFR - subtle frame
+      IColor(255, 55, 55, 55),        // kHL - highlight
+      IColor(255, 30, 30, 30),        // kSH - shadow
+      Colors::TextWhite,
+      Colors::TextWhite,
+      Colors::TextWhite
+    }).WithLabelText(IText(12.f, Colors::TextWhite, "Roboto-Regular"))
+      .WithValueText(IText(12.f, Colors::TextWhite, "Roboto-Regular"))
+      .WithDrawFrame(true)
+      .WithRoundness(0.1f);
+
     //==========================================================================
     // Title Bar
     //==========================================================================
@@ -260,6 +336,166 @@ CodecSim::CodecSim(const InstanceInfo& info)
         IText(24.f, Colors::TextWhite, "Roboto-Regular", EAlign::Near, EVAlign::Middle)),
       kCtrlTagTitle
     );
+
+    // Preset selector - flat text style (dropdown indicator via label)
+    const IVStyle presetStyle = IVStyle({
+      Colors::Background,              // kBG - match title bar
+      IColor(255, 50, 50, 50),        // kFG - hover
+      IColor(255, 60, 60, 60),        // kPR - pressed
+      IColor(255, 70, 70, 70),        // kFR - frame (not drawn)
+      IColor(255, 50, 50, 50),        // kHL - highlight
+      Colors::Background,              // kSH - shadow
+      Colors::TextGray,                // label text
+      Colors::TextWhite,               // value text
+      Colors::TextWhite                // extra
+    }).WithLabelText(IText(12.f, Colors::TextGray, "Roboto-Regular"))
+      .WithValueText(IText(12.f, Colors::TextGray, "Roboto-Regular"))
+      .WithDrawFrame(false)
+      .WithRoundness(0.3f);
+
+    // Save button - flat text with subtle border (title bar integrated)
+    const IVStyle saveBtnStyle = IVStyle({
+      Colors::Background,              // kBG - match title bar
+      IColor(255, 50, 50, 50),        // kFG - subtle hover
+      IColor(255, 60, 60, 60),        // kPR - pressed
+      IColor(255, 70, 70, 70),        // kFR - subtle frame
+      IColor(255, 50, 50, 50),        // kHL - highlight
+      Colors::Background,              // kSH - no shadow
+      Colors::TextWhite,
+      Colors::TextWhite,
+      Colors::TextWhite
+    }).WithLabelText(IText(12.f, Colors::TextWhite, "Roboto-Regular"))
+      .WithValueText(IText(12.f, Colors::TextWhite, "Roboto-Regular"))
+      .WithDrawFrame(true)
+      .WithRoundness(0.3f);
+
+    // Preset load dropdown
+    const IRECT presetBounds = IRECT(titleBarBounds.R - 220.f, titleBarBounds.T + 6.f,
+                                      titleBarBounds.R - 55.f, titleBarBounds.B - 6.f);
+    auto* pPresetBtn = new IVButtonControl(presetBounds,
+      [this](IControl* pCaller) {
+        auto presets = GetUserPresetList();
+        IPopupMenu menu;
+        if (presets.empty())
+        {
+          menu.AddItem(new IPopupMenu::Item("(No presets)", IPopupMenu::Item::kDisabled));
+        }
+        else
+        {
+          for (const auto& name : presets)
+            menu.AddItem(new IPopupMenu::Item(name.c_str()));
+          menu.AddSeparator();
+          // Delete submenu
+          IPopupMenu* pDeleteMenu = new IPopupMenu();
+          for (const auto& name : presets)
+            pDeleteMenu->AddItem(new IPopupMenu::Item(name.c_str()));
+
+          // SetFunction MUST be called BEFORE AddItem with submenu,
+          // because AddItem inherits parent's function to the submenu.
+          // When a submenu item is selected, the callback receives
+          // the SUBMENU object as pMenu (not the parent menu).
+          menu.SetFunction([this, pCaller, pDeleteMenu](IPopupMenu* pMenu) {
+            if (!pMenu) return;
+            auto* pItem = pMenu->GetChosenItem();
+            if (!pItem) return;
+
+            if (pMenu == pDeleteMenu)
+            {
+              // Delete with confirmation
+              std::string name = pItem->GetText();
+#ifdef _WIN32
+              std::string msg = "Delete preset \"" + name + "\"?";
+              int ret = MessageBoxA(NULL, msg.c_str(), "CodecSim", MB_YESNO | MB_ICONQUESTION);
+              if (ret != IDYES) return;
+#endif
+              DeleteUserPreset(name);
+              AddLogMessage("Deleted preset: " + name);
+              return;
+            }
+
+            // Normal preset load
+            std::string chosenText = pItem->GetText();
+            auto presets = GetUserPresetList();
+            for (const auto& name : presets)
+            {
+              if (name == chosenText)
+              {
+                LoadUserPreset(name);
+                pCaller->As<IVectorBase>()->SetLabelStr(name.c_str());
+                pCaller->SetDirty(false);
+                return;
+              }
+            }
+          });
+
+          // MUST use AddItem(const char*, IPopupMenu*) overload (not AddItem(Item*))
+          // because only this overload inherits parent's SetFunction to the submenu.
+          menu.AddItem("Delete...", pDeleteMenu);
+        }
+        pCaller->GetUI()->CreatePopupMenu(*pCaller, menu, pCaller->GetRECT());
+      },
+      "Presets", presetStyle, true, false);
+    pGraphics->AttachControl(pPresetBtn, kCtrlTagPresetSelector);
+    // Arrow indicator for preset dropdown
+    pGraphics->AttachControl(new DropdownArrowControl(
+      IRECT(presetBounds.R - 22.f, presetBounds.T + 4.f,
+            presetBounds.R - 8.f, presetBounds.B - 4.f)));
+
+    // Save button
+    const IRECT saveBtnBounds = IRECT(titleBarBounds.R - 50.f, titleBarBounds.T + 6.f,
+                                       titleBarBounds.R - Layout::Padding, titleBarBounds.B - 6.f);
+    auto* pSaveBtn = new IVButtonControl(saveBtnBounds,
+      [this](IControl* pCaller) {
+        // Show text entry for preset name
+        if (IControl* pEntry = pCaller->GetUI()->GetControlWithTag(kCtrlTagPresetNameEntry))
+        {
+          pEntry->Hide(false);
+          pEntry->SetDirty(false);
+          pCaller->GetUI()->CreateTextEntry(*pEntry,
+            IText(14.f, Colors::TextWhite, "Roboto-Regular"),
+            pEntry->GetRECT(), "My Preset");
+        }
+      },
+      "Save", saveBtnStyle, true, false);
+    pGraphics->AttachControl(pSaveBtn, kCtrlTagPresetSaveButton);
+
+    // Hidden text control for preset name entry (receives OnTextEntryCompletion)
+    {
+      const IRECT entryBounds = IRECT(presetBounds.L, presetBounds.T, presetBounds.R, presetBounds.B);
+      class PresetNameEntryControl : public ITextControl
+      {
+      public:
+        PresetNameEntryControl(const IRECT& bounds, CodecSim* pPlugin)
+          : ITextControl(bounds, "", IText(14.f, IColor(255, 255, 255, 255), "Roboto-Regular"))
+          , mPlugin(pPlugin)
+        {
+          Hide(true);
+        }
+
+        void OnTextEntryCompletion(const char* str, int valIdx) override
+        {
+          Hide(true);
+          if (str && str[0])
+          {
+            std::string name(str);
+            mPlugin->SaveUserPreset(name);
+            mPlugin->AddLogMessage("Saved preset: " + name);
+            // Update preset selector label
+            if (GetUI())
+            {
+              if (IControl* pBtn = GetUI()->GetControlWithTag(kCtrlTagPresetSelector))
+              {
+                pBtn->As<IVectorBase>()->SetLabelStr(name.c_str());
+                pBtn->SetDirty(false);
+              }
+            }
+          }
+        }
+      private:
+        CodecSim* mPlugin;
+      };
+      pGraphics->AttachControl(new PresetNameEntryControl(entryBounds, this), kCtrlTagPresetNameEntry);
+    }
 
     //==========================================================================
     // Main Panel (Left Side)
@@ -300,9 +536,13 @@ CodecSim::CodecSim(const InstanceInfo& info)
     {
       // For more than 4 codecs, use a dropdown menu
       pGraphics->AttachControl(
-        new IVMenuButtonControl(codecSelectorBounds, kParamCodec, "", tabStyle),
+        new IVMenuButtonControl(codecSelectorBounds, kParamCodec, "", selectorStyle),
         kCtrlTagCodecSelector
       );
+      // Arrow indicator for codec dropdown
+      pGraphics->AttachControl(new DropdownArrowControl(
+        IRECT(codecSelectorBounds.R - 25.f, codecSelectorBounds.T + 5.f,
+              codecSelectorBounds.R - 8.f, codecSelectorBounds.B - 5.f)));
     }
     yPos += Layout::CodecSelectorHeight + Layout::SectionSpacing;
 
@@ -315,9 +555,13 @@ CodecSim::CodecSim(const InstanceInfo& info)
 
     const IRECT bitrateSelectorBounds = IRECT(mainPanelInner.L, yPos, mainPanelInner.R, yPos + Layout::CodecSelectorHeight);
     pGraphics->AttachControl(
-      new IVMenuButtonControl(bitrateSelectorBounds, kParamBitrate, "", tabStyle),
+      new IVMenuButtonControl(bitrateSelectorBounds, kParamBitrate, "", selectorStyle),
       kCtrlTagBitrateSelector
     );
+    // Arrow indicator for bitrate dropdown
+    pGraphics->AttachControl(new DropdownArrowControl(
+      IRECT(bitrateSelectorBounds.R - 25.f, bitrateSelectorBounds.T + 5.f,
+            bitrateSelectorBounds.R - 8.f, bitrateSelectorBounds.B - 5.f)));
     yPos += Layout::CodecSelectorHeight + 5.f;
 
     // Custom bitrate input (visible when "Other" is selected)
@@ -336,15 +580,37 @@ CodecSim::CodecSim(const InstanceInfo& info)
 
     const IRECT sampleRateSelectorBounds = IRECT(mainPanelInner.L, yPos, mainPanelInner.R, yPos + Layout::CodecSelectorHeight);
     pGraphics->AttachControl(
-      new IVMenuButtonControl(sampleRateSelectorBounds, kParamSampleRate, "", tabStyle),
+      new IVMenuButtonControl(sampleRateSelectorBounds, kParamSampleRate, "", selectorStyle),
       kCtrlTagSampleRateSelector
     );
+    // Arrow indicator for sample rate dropdown
+    pGraphics->AttachControl(new DropdownArrowControl(
+      IRECT(sampleRateSelectorBounds.R - 25.f, sampleRateSelectorBounds.T + 5.f,
+            sampleRateSelectorBounds.R - 8.f, sampleRateSelectorBounds.B - 5.f)));
     yPos += Layout::CodecSelectorHeight + Layout::SectionSpacing;
 
-    // Section: Start/Stop Button
-    const IRECT startStopBounds = IRECT(mainPanelInner.L, yPos, mainPanelInner.R, yPos + Layout::CodecSelectorHeight + 5.f);
+    // Section: Start/Stop with Status Panel
+    const float statusHeight = Layout::CodecSelectorHeight + 12.f;
+    const IRECT statusPanelBounds = IRECT(mainPanelInner.L, yPos, mainPanelInner.R, yPos + statusHeight);
+    pGraphics->AttachControl(new StatusPanelControl(statusPanelBounds), kCtrlTagStatusDisplay);
+
+    // Transparent toggle style - no background, sits directly on status panel
+    const IVStyle toggleStyle = IVStyle({
+      IColor(0, 0, 0, 0),               // kBG - transparent
+      IColor(30, 255, 255, 255),         // kFG - subtle hover
+      IColor(0, 0, 0, 0),               // kPR - transparent
+      IColor(0, 0, 0, 0),               // kFR - no frame
+      IColor(30, 255, 255, 255),         // kHL - subtle highlight
+      IColor(0, 0, 0, 0),               // kSH - no shadow
+      Colors::TextWhite, Colors::TextWhite, Colors::TextWhite
+    }).WithLabelText(IText(13.f, Colors::TextWhite, "Roboto-Regular"))
+      .WithValueText(IText(13.f, Colors::TextWhite, "Roboto-Regular"))
+      .WithShowLabel(false).WithDrawFrame(false).WithDrawShadows(false).WithRoundness(0.2f);
+
+    const IRECT startStopBounds = IRECT(mainPanelInner.L + 2.f, yPos + 16.f,
+                                         mainPanelInner.R - 2.f, yPos + statusHeight - 2.f);
     pGraphics->AttachControl(
-      new IVToggleControl(startStopBounds, kParamEnabled, "", tabStyle, "Start", "Stop"),
+      new IVToggleControl(startStopBounds, kParamEnabled, "", toggleStyle, "Start", "Stop"),
       kCtrlTagStartStopButton
     );
 
@@ -363,7 +629,7 @@ CodecSim::CodecSim(const InstanceInfo& info)
 
     auto* pTabSwitch = new IVTabSwitchControl(tabBounds, kNoParameter,
       {"Options", "Log"}, "", tabStyle);
-    pTabSwitch->SetValue(1.0); // Default to Log tab
+    pTabSwitch->SetValue(0.0); // Default to Options tab
     pGraphics->AttachControl(pTabSwitch, kCtrlTagDetailTabSwitch);
 
     // Content area below tabs
@@ -415,8 +681,8 @@ CodecSim::CodecSim(const InstanceInfo& info)
       kCtrlTagSpinner
     );
 
-    // Initialize options UI for the default codec
-    UpdateOptionsForCodec(0);
+    // Initialize options UI for the current codec (may have been restored from saved state)
+    UpdateOptionsForCodec(mCurrentCodecIndex);
   };
 #endif
 
@@ -430,6 +696,8 @@ CodecSim::CodecSim(const InstanceInfo& info)
 
 CodecSim::~CodecSim()
 {
+  SaveStandaloneState();
+  mEnabled.store(false, std::memory_order_relaxed); // signal init thread to stop
   if (mInitThread.joinable())
     mInitThread.join();
   std::lock_guard<std::recursive_mutex> lock(mCodecMutex);
@@ -541,6 +809,19 @@ void CodecSim::OnParamChange(int paramIdx)
         AddLogMessage("Starting codec...");
         mInitThread = std::thread([this, codecIdx = mCurrentCodecIndex]() {
           InitializeCodec(codecIdx);
+          // Wait for first decoded audio output (ProcessBlock feeds data while we wait)
+          auto start = std::chrono::steady_clock::now();
+          while (mEnabled.load(std::memory_order_relaxed))
+          {
+            {
+              std::lock_guard<std::recursive_mutex> lock(mCodecMutex);
+              if (mCodecProcessor && mCodecProcessor->HasFirstAudioArrived())
+                break;
+            }
+            auto elapsed = std::chrono::steady_clock::now() - start;
+            if (elapsed > std::chrono::seconds(10)) break; // timeout
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+          }
           mInitializing.store(false);
         });
       }
@@ -557,6 +838,10 @@ void CodecSim::OnParamChange(int paramIdx)
     default:
       break;
   }
+
+  // Save state on parameter change (standalone persistence)
+  if (paramIdx != kParamEnabled && mConstructed)
+    SaveStandaloneState();
 }
 
 void CodecSim::OnIdle()
@@ -565,6 +850,13 @@ void CodecSim::OnIdle()
   {
     bool isRunning = GetParam(kParamEnabled)->Bool();
 
+    // Update status panel color
+    if (IControl* pStatus = GetUI()->GetControlWithTag(kCtrlTagStatusDisplay))
+    {
+      auto* statusPanel = dynamic_cast<StatusPanelControl*>(pStatus);
+      if (statusPanel) statusPanel->SetEnabled(isRunning);
+    }
+
     // Disable all settings controls while codec is running
     if (IControl* pCodec = GetUI()->GetControlWithTag(kCtrlTagCodecSelector))
       pCodec->SetDisabled(isRunning);
@@ -572,6 +864,13 @@ void CodecSim::OnIdle()
       pBitrate->SetDisabled(isRunning);
     if (IControl* pSampleRate = GetUI()->GetControlWithTag(kCtrlTagSampleRateSelector))
       pSampleRate->SetDisabled(isRunning);
+
+    // Disable option controls while codec is running
+    for (int i = 0; i < 5; i++)
+    {
+      if (IControl* p = GetUI()->GetControlWithTag(kCtrlTagOptionControl0 + i * 2))
+        p->SetDisabled(isRunning);
+    }
 
     // Show/hide loading spinner during initialization
     if (IControl* pSpinner = GetUI()->GetControlWithTag(kCtrlTagSpinner))
@@ -888,10 +1187,14 @@ void CodecSim::UpdateOptionsForCodec(int codecIndex)
   const CodecInfo* info = CodecRegistry::Instance().GetAvailableByIndex(codecIndex);
   if (!info) return;
 
-  // Reset option values to defaults
-  mCodecOptionValues.clear();
+  // Set defaults only for keys not already present (preserves loaded/saved values)
+  std::map<std::string, int> newValues;
   for (const auto& opt : info->options)
-    mCodecOptionValues[opt.key] = opt.defaultValue;
+  {
+    auto it = mCodecOptionValues.find(opt.key);
+    newValues[opt.key] = (it != mCodecOptionValues.end()) ? it->second : opt.defaultValue;
+  }
+  mCodecOptionValues = newValues;
 
   if (!GetUI()) return;
   IGraphics* pGraphics = GetUI();
@@ -1066,6 +1369,14 @@ void CodecSim::UpdateOptionsForCodec(int codecIndex)
     }
   }
 
+  // Ensure spinner overlay stays on top (AttachControl appends to end of draw list)
+  if (IControl* pOldSpinner = pGraphics->GetControlWithTag(kCtrlTagSpinner))
+    pGraphics->RemoveControl(pOldSpinner);
+  pGraphics->AttachControl(
+    new SpinnerOverlayControl(pGraphics->GetBounds(), IColor(120, 0, 0, 0), Colors::AccentBlue, 28.f, 4.f),
+    kCtrlTagSpinner
+  );
+
   // Update tab visibility
   SetDetailTab(mDetailTabIndex);
 }
@@ -1106,4 +1417,411 @@ void CodecSim::AddLogMessage(const std::string& msg)
   mLogMessages.push_back(msg);
   while (static_cast<int>(mLogMessages.size()) > kMaxLogLines)
     mLogMessages.erase(mLogMessages.begin());
+}
+
+//==============================================================================
+// State Serialization
+//==============================================================================
+
+static constexpr int kStateMagic = 0x43534D31; // 'CSM1'
+static constexpr int kStateVersion = 1;
+
+bool CodecSim::SerializeState(IByteChunk& chunk) const
+{
+  DebugLogCodecSim("SerializeState");
+
+  // 1. Serialize all parameters first (standard iPlug2 pattern)
+  if (!SerializeParams(chunk))
+    return false;
+
+  // 2. Append custom data after params with magic marker
+  int magic = kStateMagic;
+  int version = kStateVersion;
+  chunk.Put(&magic);
+  chunk.Put(&version);
+
+  // Codec ID (for robust codec identification across different machines)
+  const CodecInfo* info = CodecRegistry::Instance().GetAvailableByIndex(mCurrentCodecIndex);
+  std::string codecId = info ? info->id : "mp3";
+  chunk.PutStr(codecId.c_str());
+
+  // Semantic values (not param indices, for robustness against dynamic param changes)
+  int bitrateKbps = const_cast<CodecSim*>(this)->GetEffectiveBitrate();
+  chunk.Put(&bitrateKbps);
+
+  int sampleRateIdx = GetParam(kParamSampleRate)->Int();
+  int sampleRateHz = (sampleRateIdx >= 0 && sampleRateIdx < kNumSampleRatePresets)
+    ? kSampleRatePresets[sampleRateIdx] : 48000;
+  chunk.Put(&sampleRateHz);
+
+  // Codec option values
+  int numOptions = static_cast<int>(mCodecOptionValues.size());
+  chunk.Put(&numOptions);
+  for (const auto& kv : mCodecOptionValues)
+  {
+    chunk.PutStr(kv.first.c_str());
+    int val = kv.second;
+    chunk.Put(&val);
+  }
+
+  // UI state
+  chunk.Put(&mDetailTabIndex);
+
+  return true;
+}
+
+int CodecSim::UnserializeState(const IByteChunk& chunk, int startPos)
+{
+  DebugLogCodecSim("UnserializeState");
+
+  // 1. Unserialize parameters
+  int pos = UnserializeParams(chunk, startPos);
+  if (pos < 0) return pos;
+
+  // 2. Check for custom data (magic marker)
+  if (pos + static_cast<int>(sizeof(int)) > chunk.Size())
+  {
+    DebugLogCodecSim("UnserializeState: no custom data (legacy/preset-only chunk)");
+    // Legacy chunk (e.g., MakePreset param-only) - use defaults
+    mCurrentCodecIndex = GetParam(kParamCodec)->Int();
+    return pos;
+  }
+
+  int magic = 0;
+  int tempPos = chunk.Get(&magic, pos);
+  if (tempPos < 0 || magic != kStateMagic)
+  {
+    DebugLogCodecSim("UnserializeState: magic mismatch, using param values only");
+    mCurrentCodecIndex = GetParam(kParamCodec)->Int();
+    return pos;
+  }
+  pos = tempPos;
+
+  int version = 0;
+  pos = chunk.Get(&version, pos);
+  if (pos < 0) return pos;
+
+  DebugLogCodecSim("UnserializeState: version=" + std::to_string(version));
+
+  // Read codec ID and find correct index
+  WDL_String codecIdStr;
+  pos = chunk.GetStr(codecIdStr, pos);
+  if (pos < 0) return pos;
+
+  std::string codecId = codecIdStr.Get();
+  DebugLogCodecSim("UnserializeState: codecId=" + codecId);
+
+  // Find codec by ID in available list
+  auto available = CodecRegistry::Instance().GetAvailable();
+  int codecIndex = 0;
+  for (int i = 0; i < static_cast<int>(available.size()); i++)
+  {
+    if (available[i]->id == codecId) { codecIndex = i; break; }
+  }
+  mCurrentCodecIndex = codecIndex;
+  GetParam(kParamCodec)->Set(codecIndex);
+
+  // Read semantic bitrate
+  int bitrateKbps = 128;
+  pos = chunk.Get(&bitrateKbps, pos);
+  if (pos < 0) return pos;
+
+  // Rebuild bitrate presets for this codec and find matching index
+  UpdateBitrateForCodec(codecIndex);
+  int bitrateIdx = 0;
+  for (int i = 0; i < static_cast<int>(mCurrentBitratePresets.size()); i++)
+  {
+    if (mCurrentBitratePresets[i] == bitrateKbps) { bitrateIdx = i; break; }
+  }
+  // If no exact match and "Other" is available, use custom
+  if (bitrateIdx == 0 && !mCurrentBitratePresets.empty() && mCurrentBitratePresets[0] != bitrateKbps && mCurrentCodecHasOther)
+  {
+    bitrateIdx = static_cast<int>(mCurrentBitratePresets.size()); // "Other" index
+    GetParam(kParamBitrateCustom)->Set(bitrateKbps);
+  }
+  GetParam(kParamBitrate)->Set(bitrateIdx);
+
+  // Read semantic sample rate
+  int sampleRateHz = 48000;
+  pos = chunk.Get(&sampleRateHz, pos);
+  if (pos < 0) return pos;
+
+  // Find matching sample rate index
+  int sampleRateIdx = 5; // default to 48kHz
+  for (int i = 0; i < kNumSampleRatePresets; i++)
+  {
+    if (kSampleRatePresets[i] == sampleRateHz) { sampleRateIdx = i; break; }
+  }
+  GetParam(kParamSampleRate)->Set(sampleRateIdx);
+  mSampleRate = sampleRateHz;
+
+  // Read codec option values
+  int numOptions = 0;
+  pos = chunk.Get(&numOptions, pos);
+  if (pos < 0) return pos;
+
+  mCodecOptionValues.clear();
+  for (int i = 0; i < numOptions; i++)
+  {
+    WDL_String keyStr;
+    pos = chunk.GetStr(keyStr, pos);
+    if (pos < 0) return pos;
+    int val = 0;
+    pos = chunk.Get(&val, pos);
+    if (pos < 0) return pos;
+    mCodecOptionValues[keyStr.Get()] = val;
+  }
+
+  // Read UI state
+  if (pos + static_cast<int>(sizeof(int)) <= chunk.Size())
+  {
+    pos = chunk.Get(&mDetailTabIndex, pos);
+  }
+
+  // Always start stopped
+  GetParam(kParamEnabled)->Set(0);
+
+  DebugLogCodecSim("UnserializeState: restored codec=" + codecId +
+                   " bitrate=" + std::to_string(bitrateKbps) +
+                   " sampleRate=" + std::to_string(sampleRateHz));
+  return pos;
+}
+
+void CodecSim::OnRestoreState()
+{
+  DebugLogCodecSim("OnRestoreState");
+
+  // Update UI controls to reflect restored state
+  SendCurrentParamValuesFromDelegate();
+
+  if (GetUI())
+  {
+    // Rebuild options UI for the restored codec
+    UpdateOptionsForCodec(mCurrentCodecIndex);
+
+    // Refresh bitrate selector display
+    if (IControl* pCtrl = GetUI()->GetControlWithTag(kCtrlTagBitrateSelector))
+    {
+      double normVal = GetParam(kParamBitrate)->ToNormalized(static_cast<double>(GetParam(kParamBitrate)->Int()));
+      pCtrl->SetValue(1.0 - normVal, 0);
+      pCtrl->SetValueFromUserInput(normVal, 0);
+    }
+
+    // Refresh tab state
+    SetDetailTab(mDetailTabIndex);
+  }
+}
+
+//==============================================================================
+// Standalone State Persistence (file-based, using IByteChunk)
+//==============================================================================
+
+std::string CodecSim::GetAppDataPath()
+{
+#ifdef _WIN32
+  const char* appdata = getenv("APPDATA");
+  if (appdata)
+    return std::string(appdata) + "\\CodecSim\\";
+  return ".\\";
+#else
+  const char* home = getenv("HOME");
+  if (home)
+    return std::string(home) + "/Library/Application Support/CodecSim/";
+  return "./";
+#endif
+}
+
+void CodecSim::SaveStandaloneState()
+{
+  std::string dir = GetAppDataPath();
+  std::string path = dir + "state.dat";
+  DebugLogCodecSim("SaveStandaloneState to " + path);
+
+  // Ensure directory exists
+#ifdef _WIN32
+  CreateDirectoryA(dir.c_str(), NULL);
+#else
+  // mkdir -p equivalent
+  system(("mkdir -p \"" + dir + "\"").c_str());
+#endif
+
+  IByteChunk chunk;
+  if (!SerializeState(chunk))
+  {
+    DebugLogCodecSim("SaveStandaloneState: SerializeState failed");
+    return;
+  }
+
+  FILE* f = fopen(path.c_str(), "wb");
+  if (f)
+  {
+    fwrite(chunk.GetData(), 1, chunk.Size(), f);
+    fclose(f);
+    DebugLogCodecSim("SaveStandaloneState: wrote " + std::to_string(chunk.Size()) + " bytes");
+  }
+  else
+  {
+    DebugLogCodecSim("SaveStandaloneState: failed to open file");
+  }
+}
+
+void CodecSim::LoadStandaloneState()
+{
+  std::string path = GetAppDataPath() + "state.dat";
+  DebugLogCodecSim("LoadStandaloneState from " + path);
+
+  FILE* f = fopen(path.c_str(), "rb");
+  if (!f)
+  {
+    DebugLogCodecSim("LoadStandaloneState: no saved state file");
+    return;
+  }
+
+  fseek(f, 0, SEEK_END);
+  long size = ftell(f);
+  fseek(f, 0, SEEK_SET);
+
+  if (size <= 0)
+  {
+    fclose(f);
+    return;
+  }
+
+  IByteChunk chunk;
+  chunk.Resize(static_cast<int>(size));
+  fread(chunk.GetData(), 1, size, f);
+  fclose(f);
+
+  DebugLogCodecSim("LoadStandaloneState: read " + std::to_string(size) + " bytes");
+
+  int result = UnserializeState(chunk, 0);
+  if (result < 0)
+    DebugLogCodecSim("LoadStandaloneState: UnserializeState failed");
+  else
+    DebugLogCodecSim("LoadStandaloneState: restored successfully");
+}
+
+//==============================================================================
+// User Preset Management (file-based)
+//==============================================================================
+
+std::string CodecSim::GetPresetsDir()
+{
+  return GetAppDataPath() + "presets"
+#ifdef _WIN32
+    + "\\";
+#else
+    + "/";
+#endif
+}
+
+std::vector<std::string> CodecSim::GetUserPresetList()
+{
+  std::vector<std::string> result;
+  std::string dir = GetPresetsDir();
+
+#ifdef _WIN32
+  WIN32_FIND_DATAA fd;
+  std::string pattern = dir + "*.preset";
+  HANDLE hFind = FindFirstFileA(pattern.c_str(), &fd);
+  if (hFind != INVALID_HANDLE_VALUE)
+  {
+    do
+    {
+      std::string fname = fd.cFileName;
+      // Remove .preset extension
+      if (fname.size() > 7)
+        fname = fname.substr(0, fname.size() - 7);
+      result.push_back(fname);
+    } while (FindNextFileA(hFind, &fd));
+    FindClose(hFind);
+  }
+  std::sort(result.begin(), result.end());
+#endif
+
+  return result;
+}
+
+void CodecSim::SaveUserPreset(const std::string& name)
+{
+  std::string dir = GetPresetsDir();
+  DebugLogCodecSim("SaveUserPreset: " + name);
+
+#ifdef _WIN32
+  CreateDirectoryA(GetAppDataPath().c_str(), NULL);
+  CreateDirectoryA(dir.c_str(), NULL);
+#endif
+
+  IByteChunk chunk;
+  if (!SerializeState(chunk))
+  {
+    DebugLogCodecSim("SaveUserPreset: SerializeState failed");
+    return;
+  }
+
+  std::string path = dir + name + ".preset";
+  FILE* f = fopen(path.c_str(), "wb");
+  if (f)
+  {
+    fwrite(chunk.GetData(), 1, chunk.Size(), f);
+    fclose(f);
+    DebugLogCodecSim("SaveUserPreset: saved " + std::to_string(chunk.Size()) + " bytes to " + path);
+  }
+}
+
+void CodecSim::LoadUserPreset(const std::string& name)
+{
+  std::string path = GetPresetsDir() + name + ".preset";
+  DebugLogCodecSim("LoadUserPreset: " + path);
+
+  FILE* f = fopen(path.c_str(), "rb");
+  if (!f)
+  {
+    DebugLogCodecSim("LoadUserPreset: file not found");
+    return;
+  }
+
+  fseek(f, 0, SEEK_END);
+  long size = ftell(f);
+  fseek(f, 0, SEEK_SET);
+
+  if (size <= 0) { fclose(f); return; }
+
+  IByteChunk chunk;
+  chunk.Resize(static_cast<int>(size));
+  fread(chunk.GetData(), 1, size, f);
+  fclose(f);
+
+  int result = UnserializeState(chunk, 0);
+  if (result >= 0)
+  {
+    DebugLogCodecSim("LoadUserPreset: restored successfully");
+    // Update UI
+    if (GetUI())
+    {
+      SendCurrentParamValuesFromDelegate();
+      UpdateBitrateForCodec(mCurrentCodecIndex);
+      UpdateOptionsForCodec(mCurrentCodecIndex);
+      if (IControl* pBR = GetUI()->GetControlWithTag(kCtrlTagBitrateSelector))
+      {
+        double nv = GetParam(kParamBitrate)->ToNormalized(static_cast<double>(GetParam(kParamBitrate)->Int()));
+        pBR->SetValue(1.0 - nv, 0);
+        pBR->SetValueFromUserInput(nv, 0);
+      }
+      SetDetailTab(mDetailTabIndex);
+    }
+    SaveStandaloneState();
+    AddLogMessage("Loaded preset: " + name);
+  }
+}
+
+void CodecSim::DeleteUserPreset(const std::string& name)
+{
+  std::string path = GetPresetsDir() + name + ".preset";
+  DebugLogCodecSim("DeleteUserPreset: " + path);
+#ifdef _WIN32
+  DeleteFileA(path.c_str());
+#else
+  remove(path.c_str());
+#endif
 }

@@ -61,6 +61,10 @@ enum ECtrlTags
 
   kCtrlTagNoOptionsText,
 
+  kCtrlTagPresetSelector,
+  kCtrlTagPresetSaveButton,
+  kCtrlTagPresetNameEntry,
+
   kNumCtrlTags
 };
 
@@ -86,6 +90,8 @@ public:
   virtual bool IsInitialized() const = 0;
 
   virtual void SetLogCallback(std::function<void(const std::string&)> callback) = 0;
+
+  virtual bool HasFirstAudioArrived() const = 0;
 };
 
 using namespace iplug;
@@ -99,6 +105,11 @@ class CodecSim final : public Plugin
 public:
   CodecSim(const InstanceInfo& info);
   ~CodecSim();
+
+  // State serialization (used by VST3/CLAP/AU hosts for project save/load)
+  bool SerializeState(IByteChunk& chunk) const override;
+  int UnserializeState(const IByteChunk& chunk, int startPos) override;
+  void OnRestoreState() override;
 
 #if IPLUG_EDITOR
   bool OnHostRequestingSupportedViewConfiguration(int width, int height) override { return true; }
@@ -141,6 +152,16 @@ private:
   void UpdateOptionsForCodec(int codecIndex);
   void SetDetailTab(int tabIndex);
   std::string BuildCurrentAdditionalArgs();
+  void SaveStandaloneState();
+  void LoadStandaloneState();
+  static std::string GetAppDataPath();
+
+  // User preset management (file-based)
+  void SaveUserPreset(const std::string& name);
+  void LoadUserPreset(const std::string& name);
+  void DeleteUserPreset(const std::string& name);
+  std::vector<std::string> GetUserPresetList();
+  static std::string GetPresetsDir();
 
   // Dynamic bitrate presets for current codec
   std::vector<int> mCurrentBitratePresets;
@@ -149,7 +170,7 @@ private:
 
   // Codec option values and tab state
   std::map<std::string, int> mCodecOptionValues;
-  int mDetailTabIndex = 1; // 0=Options, 1=Log (default to Log)
+  int mDetailTabIndex = 0; // 0=Options, 1=Log (default to Options)
 
   // Thread safety
   std::recursive_mutex mCodecMutex;
