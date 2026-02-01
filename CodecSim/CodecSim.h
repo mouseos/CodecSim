@@ -5,6 +5,7 @@
 #include <memory>
 #include <atomic>
 #include <mutex>
+#include <thread>
 #include <functional>
 
 const int kNumPresets = 1;
@@ -39,6 +40,7 @@ enum ECtrlTags
   kCtrlTagStartStopButton,
   kCtrlTagStatusDisplay,
   kCtrlTagLogDisplay,
+  kCtrlTagSpinner,
 
   kNumCtrlTags
 };
@@ -121,5 +123,7 @@ private:
 
   bool mIsInitializing = false;
   std::atomic<bool> mEnabled{false};
+  std::atomic<bool> mInitializing{false};
+  std::thread mInitThread;
   bool mConstructed = false;
 };

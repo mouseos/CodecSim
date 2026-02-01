@@ -68,6 +68,68 @@ static const int kSampleRatePresets[] = {8000, 16000, 22050, 32000, 44100, 48000
 static const int kNumSampleRatePresets = sizeof(kSampleRatePresets) / sizeof(kSampleRatePresets[0]);
 
 //==============================================================================
+// Spinner Overlay Control (full-screen overlay + centered rotating arc)
+//==============================================================================
+class SpinnerOverlayControl : public IControl
+{
+public:
+  SpinnerOverlayControl(const IRECT& bounds,
+    const IColor& overlayColor = IColor(120, 0, 0, 0),
+    const IColor& arcColor = IColor(255, 100, 180, 255),
+    float arcRadius = 24.f, float thickness = 4.f)
+  : IControl(bounds)
+  , mOverlayColor(overlayColor)
+  , mArcColor(arcColor)
+  , mArcRadius(arcRadius)
+  , mThickness(thickness)
+  {
+    mIgnoreMouse = false; // block mouse input to controls behind
+    Hide(true);
+  }
+
+  void Draw(IGraphics& g) override
+  {
+    // Semi-transparent dark overlay
+    g.FillRect(mOverlayColor, mRECT);
+
+    // Centered spinning arc
+    float cx = mRECT.MW();
+    float cy = mRECT.MH();
+    float angle = static_cast<float>(GetAnimationProgress()) * 360.f;
+    g.DrawArc(mArcColor, cx, cy, mArcRadius, angle, angle + 270.f, nullptr, mThickness);
+
+    // "Loading..." text below spinner
+    IRECT textRect(cx - 60.f, cy + mArcRadius + 8.f, cx + 60.f, cy + mArcRadius + 28.f);
+    g.DrawText(IText(13.f, IColor(200, 255, 255, 255), "Roboto-Regular", EAlign::Center), "Loading...", textRect);
+  }
+
+  void OnEndAnimation() override
+  {
+    // Restart animation loop while visible
+    if (!IsHidden())
+      SetAnimation([](IControl* pCaller) { pCaller->SetDirty(false); }, 800);
+  }
+
+  void StartSpinning()
+  {
+    Hide(false);
+    SetAnimation([](IControl* pCaller) { pCaller->SetDirty(false); }, 800);
+  }
+
+  void StopSpinning()
+  {
+    SetAnimation(nullptr);
+    Hide(true);
+  }
+
+private:
+  IColor mOverlayColor;
+  IColor mArcColor;
+  float mArcRadius;
+  float mThickness;
+};
+
+//==============================================================================
 // Constructor
 //==============================================================================
 CodecSim::CodecSim(const InstanceInfo& info)
@@ -80,7 +142,7 @@ CodecSim::CodecSim(const InstanceInfo& info)
   DebugLogCodecSim("Constructor - START");
 
   // Detect available codecs from ffmpeg
-  CodecRegistry::Instance().DetectAvailable();
+  CodecRegistry::Instance().DetectAvailable(FFmpegPipeManager::ResolveFFmpegPath());
 
   auto availableCodecs = CodecRegistry::Instance().GetAvailable();
   int numAvailable = static_cast<int>(availableCodecs.size());
@@ -268,7 +330,7 @@ CodecSim::CodecSim(const InstanceInfo& info)
     // Section: Start/Stop Button
     const IRECT startStopBounds = IRECT(mainPanelInner.L, yPos, mainPanelInner.R, yPos + Layout::CodecSelectorHeight + 5.f);
     pGraphics->AttachControl(
-      new IVToggleControl(startStopBounds, kParamEnabled, "Start", tabStyle, "Stop", "Start"),
+      new IVToggleControl(startStopBounds, kParamEnabled, "", tabStyle, "Start", "Stop"),
       kCtrlTagStartStopButton
     );
 
@@ -292,6 +354,14 @@ CodecSim::CodecSim(const InstanceInfo& info)
         IText(10.f, Colors::TextGray, "Roboto-Regular", EAlign::Near, EVAlign::Top)),
       kCtrlTagLogDisplay
     );
+
+    //==========================================================================
+    // Loading Overlay (full-screen, rendered last = on top of everything)
+    //==========================================================================
+    pGraphics->AttachControl(
+      new SpinnerOverlayControl(bounds, IColor(120, 0, 0, 0), Colors::AccentBlue, 28.f, 4.f),
+      kCtrlTagSpinner
+    );
   };
 #endif
 
@@ -305,6 +375,8 @@ CodecSim::CodecSim(const InstanceInfo& info)
 
 CodecSim::~CodecSim()
 {
+  if (mInitThread.joinable())
+    mInitThread.join();
   std::lock_guard<std::recursive_mutex> lock(mCodecMutex);
   if (mCodecProcessor) {
     mCodecProcessor->Shutdown();
@@ -386,16 +458,36 @@ void CodecSim::OnParamChange(int paramIdx)
       bool enabled = GetParam(kParamEnabled)->Bool();
       mEnabled.store(enabled, std::memory_order_relaxed);
       DebugLogCodecSim("OnParamChange: Enabled=" + std::to_string(enabled));
+
+      // Join any previous background thread
+      if (mInitThread.joinable())
+        mInitThread.join();
+
+      mInitializing.store(true);
+
+      // Start spinner immediately (don't wait for OnIdle)
+      if (GetUI())
+      {
+        if (IControl* pSpinner = GetUI()->GetControlWithTag(kCtrlTagSpinner))
+          dynamic_cast<SpinnerOverlayControl*>(pSpinner)->StartSpinning();
+      }
+
       if (enabled)
       {
         mCurrentCodecIndex = GetParam(kParamCodec)->Int();
         AddLogMessage("Starting codec...");
-        InitializeCodec(mCurrentCodecIndex);
+        mInitThread = std::thread([this, codecIdx = mCurrentCodecIndex]() {
+          InitializeCodec(codecIdx);
+          mInitializing.store(false);
+        });
       }
       else
       {
         AddLogMessage("Stopping codec...");
-        StopCodec();
+        mInitThread = std::thread([this]() {
+          StopCodec();
+          mInitializing.store(false);
+        });
       }
     }
     break;
@@ -408,12 +500,32 @@ void CodecSim::OnIdle()
 {
   if (GetUI())
   {
-    // Show/hide custom bitrate input based on "Other" selection
+    bool isRunning = GetParam(kParamEnabled)->Bool();
+
+    // Disable all settings controls while codec is running
+    if (IControl* pCodec = GetUI()->GetControlWithTag(kCtrlTagCodecSelector))
+      pCodec->SetDisabled(isRunning);
+    if (IControl* pBitrate = GetUI()->GetControlWithTag(kCtrlTagBitrateSelector))
+      pBitrate->SetDisabled(isRunning);
+    if (IControl* pSampleRate = GetUI()->GetControlWithTag(kCtrlTagSampleRateSelector))
+      pSampleRate->SetDisabled(isRunning);
+
+    // Show/hide loading spinner during initialization
+    if (IControl* pSpinner = GetUI()->GetControlWithTag(kCtrlTagSpinner))
+    {
+      bool initializing = mInitializing.load();
+      if (initializing && pSpinner->IsHidden())
+        dynamic_cast<SpinnerOverlayControl*>(pSpinner)->StartSpinning();
+      else if (!initializing && !pSpinner->IsHidden())
+        dynamic_cast<SpinnerOverlayControl*>(pSpinner)->StopSpinning();
+    }
+
+    // Show/hide custom bitrate input based on "Other" selection; also disable when running
     if (IControl* pCustomBitrate = GetUI()->GetControlWithTag(kCtrlTagBitrateCustom))
     {
       bool isOther = (GetParam(kParamBitrate)->Int() >= kNumBitratePresets);
       pCustomBitrate->Hide(!isOther);
-      pCustomBitrate->SetDisabled(!isOther);
+      pCustomBitrate->SetDisabled(!isOther || isRunning);
     }
 
     if (IControl* pLogCtrl = GetUI()->GetControlWithTag(kCtrlTagLogDisplay))

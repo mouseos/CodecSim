@@ -84,7 +84,7 @@ void CodecRegistry::RegisterBuiltinCodecs()
       128,
       1024,
       2048,
-      "-profile:a 5 -vbr 0 -afterburner 1",
+      "-profile:a aac_he -afterburner 1",
       false,
       false
     },
@@ -226,6 +226,38 @@ void CodecRegistry::RegisterBuiltinCodecs()
       64,
       64,
       64,
+      160,
+      160,
+      "",
+      false,
+      false
+    },
+    // Speex (speech codec)
+    {
+      "speex",
+      "Speex",
+      "libspeex",
+      "ogg",
+      "ogg",
+      24,
+      2,
+      44,
+      320,
+      320,
+      "",
+      false,
+      false
+    },
+    // GSM 06.10
+    {
+      "gsm",
+      "GSM 06.10",
+      "libgsm",
+      "gsm",
+      "gsm",
+      13,
+      13,
+      13,
       160,
       160,
       "",

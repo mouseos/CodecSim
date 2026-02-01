@@ -86,7 +86,7 @@ bool GenericCodecProcessor::Initialize(int sampleRate, int channels)
 
   // Configure FFmpegPipeManager
   FFmpegPipeManager::Config config;
-  config.ffmpegPath = "ffmpeg.exe";
+  config.ffmpegPath = FFmpegPipeManager::ResolveFFmpegPath();
   config.codecName = mCodecInfo.encoderName;
   config.sampleRate = mSampleRate;
   config.channels = mChannels;

@@ -37,6 +37,9 @@ public:
   FFmpegPipeManager(const FFmpegPipeManager&) = delete;
   FFmpegPipeManager& operator=(const FFmpegPipeManager&) = delete;
 
+  // Resolve ffmpeg.exe path: first checks next to the running executable, then falls back to PATH
+  static std::string ResolveFFmpegPath();
+
   //--------------------------------------------------------------------------
   // Configuration
   //--------------------------------------------------------------------------
@@ -53,7 +56,7 @@ public:
     size_t bufferSize;                // Internal buffer size in bytes
 
     Config()
-      : ffmpegPath("ffmpeg.exe")
+      : ffmpegPath(ResolveFFmpegPath())
       , codecName("libmp3lame")
       , sampleRate(48000)
       , channels(2)

@@ -10,6 +10,30 @@
 #include <cstring>
 
 //==============================================================================
+// Static Utility
+//==============================================================================
+
+std::string FFmpegPipeManager::ResolveFFmpegPath()
+{
+  char exePath[MAX_PATH] = {};
+  DWORD len = GetModuleFileNameA(NULL, exePath, MAX_PATH);
+  if (len > 0 && len < MAX_PATH)
+  {
+    // Find last path separator
+    std::string dir(exePath);
+    size_t pos = dir.find_last_of("\\/");
+    if (pos != std::string::npos)
+    {
+      std::string candidate = dir.substr(0, pos + 1) + "ffmpeg.exe";
+      DWORD attr = GetFileAttributesA(candidate.c_str());
+      if (attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY))
+        return candidate;
+    }
+  }
+  return "ffmpeg.exe";
+}
+
+//==============================================================================
 // Constructor/Destructor
 //==============================================================================
 
