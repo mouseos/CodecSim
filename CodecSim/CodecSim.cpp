@@ -570,7 +570,7 @@ CodecSim::CodecSim(const InstanceInfo& info)
       Colors::TextWhite, Colors::TextWhite, Colors::TextWhite
     }).WithLabelText(IText(13.f, Colors::TextWhite, "Roboto-Regular"))
       .WithValueText(IText(13.f, Colors::TextWhite, "Roboto-Regular"))
-      .WithShowLabel(false).WithDrawFrame(true).WithDrawShadows(false).WithRoundness(4.f);
+      .WithShowLabel(true).WithDrawFrame(true).WithDrawShadows(false).WithRoundness(4.f);
 
     auto* pApplyBtn = new IVButtonControl(applyBounds,
       [this](IControl* pCaller) {
@@ -760,6 +760,13 @@ void CodecSim::OnParamChange(int paramIdx)
       break;
   }
 
+  // Mark pending changes for codec/bitrate/samplerate
+  if (paramIdx == kParamCodec || paramIdx == kParamBitrate ||
+      paramIdx == kParamBitrateCustom || paramIdx == kParamSampleRate)
+  {
+    mPendingApply.store(true);
+  }
+
   // Save state on parameter change (standalone persistence)
   if (paramIdx != kParamEnabled && mConstructed)
     SaveStandaloneState();
@@ -767,52 +774,119 @@ void CodecSim::OnParamChange(int paramIdx)
 
 void CodecSim::OnIdle()
 {
-  if (GetUI())
+  // Cache GetUI() once - it becomes nullptr when editor is closed/being recreated
+  IGraphics* pUI = GetUI();
+  if (!pUI)
   {
-    // Show/hide loading spinner during initialization
-    if (IControl* pSpinner = GetUI()->GetControlWithTag(kCtrlTagSpinner))
+    mLastApplyButtonState = -1; // Reset tracking when editor closes
+    return;
+  }
+
+  // Update Apply button appearance based on pending changes (only when state changes)
+  {
+    bool pending = mPendingApply.load();
+    bool initializing = mInitializing.load();
+    int desiredState = (pending && !initializing) ? 1 : (pending ? -1 : 0);
+
+    if (desiredState != -1 && desiredState != mLastApplyButtonState)
+    {
+      if (IControl* pApplyBtn = pUI->GetControlWithTag(kCtrlTagApplyButton))
+      {
+        auto* pBtn = dynamic_cast<IVButtonControl*>(pApplyBtn);
+        if (pBtn)
+        {
+          if (desiredState == 1)
+          {
+            // Orange: unapplied changes exist
+            const IVStyle pendingStyle = IVStyle({
+              IColor(255, 180, 120, 30),
+              IColor(255, 210, 150, 50),
+              IColor(255, 160, 100, 20),
+              IColor(255, 220, 160, 60),
+              IColor(255, 200, 140, 40),
+              IColor(0, 0, 0, 0),
+              Colors::TextWhite, Colors::TextWhite, Colors::TextWhite
+            }).WithLabelText(IText(13.f, Colors::TextWhite, "Roboto-Regular"))
+              .WithValueText(IText(13.f, Colors::TextWhite, "Roboto-Regular"))
+              .WithShowLabel(true).WithDrawFrame(true).WithDrawShadows(false).WithRoundness(4.f);
+            pBtn->SetStyle(pendingStyle);
+            pBtn->SetLabelStr("Apply *");
+          }
+          else
+          {
+            // Green: all changes applied
+            const IVStyle appliedStyle = IVStyle({
+              IColor(255, 30, 100, 60),
+              IColor(255, 50, 140, 80),
+              IColor(255, 40, 120, 70),
+              IColor(255, 60, 160, 90),
+              IColor(255, 50, 140, 80),
+              IColor(0, 0, 0, 0),
+              Colors::TextWhite, Colors::TextWhite, Colors::TextWhite
+            }).WithLabelText(IText(13.f, Colors::TextWhite, "Roboto-Regular"))
+              .WithValueText(IText(13.f, Colors::TextWhite, "Roboto-Regular"))
+              .WithShowLabel(true).WithDrawFrame(true).WithDrawShadows(false).WithRoundness(4.f);
+            pBtn->SetStyle(appliedStyle);
+            pBtn->SetLabelStr("Apply");
+          }
+          pApplyBtn->SetDirty(false);
+          mLastApplyButtonState = desiredState;
+        }
+      }
+    }
+  }
+
+  // Show/hide loading spinner during initialization
+  if (IControl* pSpinner = pUI->GetControlWithTag(kCtrlTagSpinner))
+  {
+    auto* pSpinnerCtrl = dynamic_cast<SpinnerOverlayControl*>(pSpinner);
+    if (pSpinnerCtrl)
     {
       bool initializing = mInitializing.load();
       if (initializing && pSpinner->IsHidden())
-        dynamic_cast<SpinnerOverlayControl*>(pSpinner)->StartSpinning();
+        pSpinnerCtrl->StartSpinning();
       else if (!initializing && !pSpinner->IsHidden())
-        dynamic_cast<SpinnerOverlayControl*>(pSpinner)->StopSpinning();
+        pSpinnerCtrl->StopSpinning();
     }
+  }
 
-    // Handle detail panel tab switching
-    if (IControl* pTabSwitch = GetUI()->GetControlWithTag(kCtrlTagDetailTabSwitch))
+  // Handle detail panel tab switching
+  if (IControl* pTabSwitch = pUI->GetControlWithTag(kCtrlTagDetailTabSwitch))
+  {
+    int tabIdx = static_cast<int>(pTabSwitch->GetValue() * 1.0 + 0.5); // 0=Options, 1=Log
+    if (tabIdx != mDetailTabIndex)
+      SetDetailTab(tabIdx);
+  }
+
+  // Hide/show bitrate controls based on codec type
+  bool hideBitrate = mCurrentCodecIsLossless;
+  if (IControl* pBitrateLabel = pUI->GetControlWithTag(kCtrlTagBitrateLabel))
+    pBitrateLabel->Hide(hideBitrate);
+  if (IControl* pBitrate = pUI->GetControlWithTag(kCtrlTagBitrateSelector))
+    pBitrate->Hide(hideBitrate);
+
+  // Show/hide custom bitrate input
+  if (IControl* pCustomBitrate = pUI->GetControlWithTag(kCtrlTagBitrateCustom))
+  {
+    int numPresets = static_cast<int>(mCurrentBitratePresets.size());
+    bool isOther = mCurrentCodecHasOther && (GetParam(kParamBitrate)->Int() >= numPresets);
+    pCustomBitrate->Hide(hideBitrate || !isOther);
+  }
+
+  if (IControl* pLogCtrl = pUI->GetControlWithTag(kCtrlTagLogDisplay))
+  {
+    std::string logText;
     {
-      int tabIdx = static_cast<int>(pTabSwitch->GetValue() * 1.0 + 0.5); // 0=Options, 1=Log
-      if (tabIdx != mDetailTabIndex)
-        SetDetailTab(tabIdx);
+      std::lock_guard<std::mutex> lock(mLogMutex);
+      for (const auto& line : mLogMessages)
+        logText += line + "\n";
     }
-
-    // Hide/show bitrate controls based on codec type
-    bool hideBitrate = mCurrentCodecIsLossless;
-    if (IControl* pBitrateLabel = GetUI()->GetControlWithTag(kCtrlTagBitrateLabel))
-      pBitrateLabel->Hide(hideBitrate);
-    if (IControl* pBitrate = GetUI()->GetControlWithTag(kCtrlTagBitrateSelector))
-      pBitrate->Hide(hideBitrate);
-
-    // Show/hide custom bitrate input
-    if (IControl* pCustomBitrate = GetUI()->GetControlWithTag(kCtrlTagBitrateCustom))
+    if (!logText.empty())
     {
-      int numPresets = static_cast<int>(mCurrentBitratePresets.size());
-      bool isOther = mCurrentCodecHasOther && (GetParam(kParamBitrate)->Int() >= numPresets);
-      pCustomBitrate->Hide(hideBitrate || !isOther);
-    }
-
-    if (IControl* pLogCtrl = GetUI()->GetControlWithTag(kCtrlTagLogDisplay))
-    {
-      std::string logText;
+      auto* pMultiLine = dynamic_cast<IMultiLineTextControl*>(pLogCtrl);
+      if (pMultiLine)
       {
-        std::lock_guard<std::mutex> lock(mLogMutex);
-        for (const auto& line : mLogMessages)
-          logText += line + "\n";
-      }
-      if (!logText.empty())
-      {
-        pLogCtrl->As<IMultiLineTextControl>()->SetStr(logText.c_str());
+        pMultiLine->SetStr(logText.c_str());
         pLogCtrl->SetDirty(false);
       }
     }
@@ -962,8 +1036,11 @@ void CodecSim::InitializeCodec(int codecIndex)
   if (processor->Initialize(mSampleRate, mNumChannels))
   {
     int latency = processor->GetLatencySamples();
-    SetLatency(latency);
-    mLatencySamples.store(latency);
+    if (latency != mLatencySamples.load())
+    {
+      SetLatency(latency);
+      mLatencySamples.store(latency);
+    }
 
     const int maxFrames = 8192;
     mInterleavedInput.resize(maxFrames * mNumChannels);
@@ -999,11 +1076,14 @@ void CodecSim::StopCodec()
 
 void CodecSim::ApplyCodecSettings()
 {
+  mPendingApply.store(false);
   DebugLogCodecSim("ApplyCodecSettings called");
 
-  // Join any previous background thread
+  // Cancel previous init wait and join thread quickly
+  mCancelInit.store(true);
   if (mInitThread.joinable())
     mInitThread.join();
+  mCancelInit.store(false);
 
   mInitializing.store(true);
 
@@ -1019,9 +1099,9 @@ void CodecSim::ApplyCodecSettings()
 
   mInitThread = std::thread([this, codecIdx = mCurrentCodecIndex]() {
     InitializeCodec(codecIdx);
-    // Wait for first decoded audio output
+    // Wait for first decoded audio output (cancellable)
     auto start = std::chrono::steady_clock::now();
-    while (true)
+    while (!mCancelInit.load())
     {
       {
         std::lock_guard<std::recursive_mutex> lock(mCodecMutex);
@@ -1029,7 +1109,7 @@ void CodecSim::ApplyCodecSettings()
           break;
       }
       auto elapsed = std::chrono::steady_clock::now() - start;
-      if (elapsed > std::chrono::seconds(10)) break;
+      if (elapsed > std::chrono::seconds(5)) break;
       std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
     mInitializing.store(false);
@@ -1126,15 +1206,13 @@ void CodecSim::UpdateBitrateForCodec(int codecIndex)
       info->defaultBitrate, info->minBitrate, info->maxBitrate, "kbps");
   }
 
-  // Refresh UI controls - force IVMenuButtonControl to update its button text
-  if (GetUI())
+  // Directly update control display (avoids feedback loop via host parameter notifications)
+  if (IGraphics* pUI = GetUI())
   {
-    if (IControl* pCtrl = GetUI()->GetControlWithTag(kCtrlTagBitrateSelector))
+    if (IControl* pCtrl = pUI->GetControlWithTag(kCtrlTagBitrateSelector))
     {
       double normVal = pBitrate->ToNormalized(static_cast<double>(defaultIdx));
-      // SetValueFromUserInput has an equality guard, so set a different value first
-      pCtrl->SetValue(1.0 - normVal, 0);
-      pCtrl->SetValueFromUserInput(normVal, 0);
+      pCtrl->SetValueFromDelegate(normVal, 0);
     }
   }
 }
@@ -1142,7 +1220,8 @@ void CodecSim::UpdateBitrateForCodec(int codecIndex)
 void CodecSim::SetDetailTab(int tabIndex)
 {
   mDetailTabIndex = tabIndex;
-  if (!GetUI()) return;
+  IGraphics* pUI = GetUI();
+  if (!pUI) return;
 
   bool showOptions = (tabIndex == 0);
   bool showLog = (tabIndex == 1);
@@ -1155,18 +1234,18 @@ void CodecSim::SetDetailTab(int tabIndex)
   for (int i = 0; i < 5; i++)
   {
     bool showSlot = showOptions && (i < numOptions);
-    if (IControl* p = GetUI()->GetControlWithTag(kCtrlTagOptionLabel0 + i * 2))
+    if (IControl* p = pUI->GetControlWithTag(kCtrlTagOptionLabel0 + i * 2))
       p->Hide(!showSlot);
-    if (IControl* p = GetUI()->GetControlWithTag(kCtrlTagOptionControl0 + i * 2))
+    if (IControl* p = pUI->GetControlWithTag(kCtrlTagOptionControl0 + i * 2))
       p->Hide(!showSlot);
   }
 
   // Show "no options" text if Options tab and zero options
-  if (IControl* p = GetUI()->GetControlWithTag(kCtrlTagNoOptionsText))
+  if (IControl* p = pUI->GetControlWithTag(kCtrlTagNoOptionsText))
     p->Hide(!showOptions || numOptions > 0);
 
   // Show/hide log
-  if (IControl* p = GetUI()->GetControlWithTag(kCtrlTagLogDisplay))
+  if (IControl* p = pUI->GetControlWithTag(kCtrlTagLogDisplay))
     p->Hide(!showLog);
 }
 
@@ -1184,8 +1263,8 @@ void CodecSim::UpdateOptionsForCodec(int codecIndex)
   }
   mCodecOptionValues = newValues;
 
-  if (!GetUI()) return;
   IGraphics* pGraphics = GetUI();
+  if (!pGraphics) return;
 
   // Calculate content bounds (same as layout)
   const IRECT bounds = pGraphics->GetBounds();
@@ -1214,7 +1293,10 @@ void CodecSim::UpdateOptionsForCodec(int codecIndex)
 
       // Update label text
       if (IControl* pLabel = pGraphics->GetControlWithTag(labelTag))
-        pLabel->As<ITextControl>()->SetStr(opt.label.c_str());
+      {
+        if (auto* pText = dynamic_cast<ITextControl*>(pLabel))
+          pText->SetStr(opt.label.c_str());
+      }
 
       // Remove old control and create new one
       // For compound controls (IContainerBase like IVNumberBoxControl),
@@ -1276,7 +1358,8 @@ void CodecSim::UpdateOptionsForCodec(int codecIndex)
             if (!opt.choices.empty())
               pTabs->SetValue(static_cast<double>(opt.defaultValue) / static_cast<double>(std::max(1, (int)opt.choices.size() - 1)));
             pTabs->SetActionFunction([this, key = opt.key](IControl* pCaller) {
-              mCodecOptionValues[key] = pCaller->As<ISwitchControlBase>()->GetSelectedIdx();
+              if (auto* pSwitch = dynamic_cast<ISwitchControlBase*>(pCaller))
+                mCodecOptionValues[key] = pSwitch->GetSelectedIdx();
             });
             pNewCtrl = pTabs;
           }
@@ -1297,12 +1380,14 @@ void CodecSim::UpdateOptionsForCodec(int codecIndex)
                   int idx = pMenu->GetChosenItemIdx();
                   if (idx >= 0) {
                     mCodecOptionValues[key] = idx;
-                    pCaller->As<IVectorBase>()->SetLabelStr(pMenu->GetChosenItem()->GetText());
+                    if (auto* pVec = dynamic_cast<IVectorBase*>(pCaller))
+                      pVec->SetLabelStr(pMenu->GetChosenItem()->GetText());
                     pCaller->SetDirty(false);
                   }
                 });
 
-                pCaller->GetUI()->CreatePopupMenu(*pCaller, menu, pCaller->GetRECT());
+                if (IGraphics* pCallerUI = pCaller->GetUI())
+                  pCallerUI->CreatePopupMenu(*pCaller, menu, pCaller->GetRECT());
               },
               defaultLabel.c_str(), optStyle, true, false);
             pNewCtrl = pButton;
@@ -1329,11 +1414,12 @@ void CodecSim::UpdateOptionsForCodec(int codecIndex)
           auto* pNum = new IVNumberBoxControl(ctrlBounds, kNoParameter, nullptr, "", numStyle,
             true, opt.defaultValue, opt.minValue, opt.maxValue);
           pNum->SetActionFunction([this, key = opt.key](IControl* pCaller) {
-            double normVal = pCaller->GetValue();
-            auto* pNB = pCaller->As<IVNumberBoxControl>();
-            // Map normalized value back to integer range
-            int minV = static_cast<int>(pNB->GetRealValue()); // approximate
-            mCodecOptionValues[key] = minV;
+            if (auto* pNB = dynamic_cast<IVNumberBoxControl*>(pCaller))
+            {
+              // Map normalized value back to integer range
+              int val = static_cast<int>(pNB->GetRealValue());
+              mCodecOptionValues[key] = val;
+            }
           });
           pNewCtrl = pNum;
           break;

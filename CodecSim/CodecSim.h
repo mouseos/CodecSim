@@ -183,4 +183,11 @@ private:
   std::atomic<bool> mInitializing{false};
   std::thread mInitThread;
   bool mConstructed = false;
+
+  // Pending changes indicator
+  std::atomic<bool> mPendingApply{false};
+  std::atomic<bool> mCancelInit{false};
+
+  // UI state tracking (to avoid redundant updates in OnIdle)
+  int mLastApplyButtonState = -1; // -1=unknown, 0=applied(green), 1=pending(orange)
 };
