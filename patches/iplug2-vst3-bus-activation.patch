@@ -1,0 +1,24 @@
+--- a/IPlug/VST3/IPlugVST3_ProcessorBase.h
++++ b/IPlug/VST3/IPlugVST3_ProcessorBase.h
+@@ -155,7 +155,9 @@
+         WDL_String busName;
+         GetBusName(ERoute::kInput, inBusIdx, nIn, busName);
+         Steinberg::UString(tmpStringBuf, 128).fromAscii(busName.Get(), 128);
+-        pPlug->addAudioInput(tmpStringBuf, arr, (BusTypes) inBusIdx > 0, flags);
++        auto* inBus = pPlug->addAudioInput(tmpStringBuf, arr, (BusTypes) inBusIdx > 0, flags);
++        if (flags & BusInfo::BusFlags::kDefaultActive)
++          inBus->setActive(true);
+       }
+
+       const int nOut = pConfig->NBuses(ERoute::kOutput);
+@@ -168,7 +170,9 @@
+         WDL_String busName;
+         GetBusName(ERoute::kOutput, outBusIdx, nOut, busName);
+         Steinberg::UString(tmpStringBuf, 128).fromAscii(busName.Get(), 128);
+-        pPlug->addAudioOutput(tmpStringBuf, arr, (BusTypes) outBusIdx > 0, flags);
++        auto* outBus = pPlug->addAudioOutput(tmpStringBuf, arr, (BusTypes) outBusIdx > 0, flags);
++        if (flags & BusInfo::BusFlags::kDefaultActive)
++          outBus->setActive(true);
+       }
+
+       return true;

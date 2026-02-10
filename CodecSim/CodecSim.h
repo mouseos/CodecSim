@@ -2,6 +2,7 @@
 
 #include "IPlug_include_in_plug_hdr.h"
 #include <vector>
+#include <deque>
 #include <map>
 #include <memory>
 #include <atomic>
@@ -39,8 +40,7 @@ enum ECtrlTags
   kCtrlTagBitrateCustom,
   kCtrlTagSampleRateSelector,
 
-  kCtrlTagStartStopButton,
-  kCtrlTagStatusDisplay,
+  kCtrlTagApplyButton,
   kCtrlTagLogDisplay,
   kCtrlTagSpinner,
 
@@ -127,6 +127,9 @@ private:
   std::vector<float> mInterleavedInput;
   std::vector<float> mInterleavedOutput;
 
+  // Decoded sample accumulation buffer (absorbs bursty decode pipeline)
+  std::deque<float> mDecodedBuffer;
+
   // Codec processor
   std::unique_ptr<ICodecProcessor> mCodecProcessor;
 
@@ -145,6 +148,7 @@ private:
 
   // Helper methods
   void InitializeCodec(int codecIndex);
+  void ApplyCodecSettings();
   void StopCodec();
   void AddLogMessage(const std::string& msg);
   void UpdateBitrateForCodec(int codecIndex);
@@ -176,7 +180,6 @@ private:
   std::recursive_mutex mCodecMutex;
 
   bool mIsInitializing = false;
-  std::atomic<bool> mEnabled{false};
   std::atomic<bool> mInitializing{false};
   std::thread mInitThread;
   bool mConstructed = false;

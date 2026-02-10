@@ -158,44 +158,6 @@ private:
 };
 
 //==============================================================================
-// Status Panel (Enabled/Disabled indicator with dynamic color)
-//==============================================================================
-class StatusPanelControl : public IControl
-{
-public:
-  StatusPanelControl(const IRECT& bounds)
-    : IControl(bounds)
-  {
-    mIgnoreMouse = true;
-  }
-
-  void Draw(IGraphics& g) override
-  {
-    IColor bgColor = mEnabled
-      ? IColor(255, 25, 80, 45)
-      : IColor(255, 50, 50, 50);
-    g.FillRoundRect(bgColor, mRECT, 4.f);
-
-    IColor textColor = mEnabled
-      ? IColor(255, 100, 230, 120)
-      : IColor(255, 140, 140, 140);
-
-    const char* label = mEnabled ? "Enabled" : "Disabled";
-    IText textStyle(11.f, textColor, "Roboto-Regular", EAlign::Center, EVAlign::Middle);
-    IRECT textBounds = mRECT.GetFromTop(14.f).GetTranslated(0.f, 2.f);
-    g.DrawText(textStyle, label, textBounds);
-  }
-
-  void SetEnabled(bool enabled)
-  {
-    if (mEnabled != enabled) { mEnabled = enabled; SetDirty(false); }
-  }
-
-private:
-  bool mEnabled = false;
-};
-
-//==============================================================================
 // Constructor
 //==============================================================================
 CodecSim::CodecSim(const InstanceInfo& info)
@@ -206,6 +168,11 @@ CodecSim::CodecSim(const InstanceInfo& info)
 , mLatencySamples(0)
 {
   DebugLogCodecSim("Constructor - START");
+
+  // Pre-allocate interleaved buffers (ensures valid even before codec init)
+  const int maxFrames = 8192;
+  mInterleavedInput.resize(maxFrames * 2, 0.f);
+  mInterleavedOutput.resize(maxFrames * 2, 0.f);
 
   // Detect available codecs from ffmpeg
   CodecRegistry::Instance().DetectAvailable(FFmpegPipeManager::ResolveFFmpegPath());
@@ -254,8 +221,8 @@ CodecSim::CodecSim(const InstanceInfo& info)
     GetParam(kParamSampleRate)->SetDisplayText(i, label);
   }
 
-  // Start/Stop toggle (always start disabled)
-  GetParam(kParamEnabled)->InitBool("Enabled", false);
+  // Enabled parameter (kept for state compatibility, always true)
+  GetParam(kParamEnabled)->InitBool("Enabled", true);
 
   // Load standalone state (for VST3 the host handles state via SerializeState/UnserializeState)
   LoadStandaloneState();
@@ -589,30 +556,28 @@ CodecSim::CodecSim(const InstanceInfo& info)
             sampleRateSelectorBounds.R - 8.f, sampleRateSelectorBounds.B - 5.f)));
     yPos += Layout::CodecSelectorHeight + Layout::SectionSpacing;
 
-    // Section: Start/Stop with Status Panel
-    const float statusHeight = Layout::CodecSelectorHeight + 12.f;
-    const IRECT statusPanelBounds = IRECT(mainPanelInner.L, yPos, mainPanelInner.R, yPos + statusHeight);
-    pGraphics->AttachControl(new StatusPanelControl(statusPanelBounds), kCtrlTagStatusDisplay);
+    // Section: Apply Button
+    const float applyHeight = Layout::CodecSelectorHeight;
+    const IRECT applyBounds = IRECT(mainPanelInner.L, yPos, mainPanelInner.R, yPos + applyHeight);
 
-    // Transparent toggle style - no background, sits directly on status panel
-    const IVStyle toggleStyle = IVStyle({
-      IColor(0, 0, 0, 0),               // kBG - transparent
-      IColor(30, 255, 255, 255),         // kFG - subtle hover
-      IColor(0, 0, 0, 0),               // kPR - transparent
-      IColor(0, 0, 0, 0),               // kFR - no frame
-      IColor(30, 255, 255, 255),         // kHL - subtle highlight
+    const IVStyle applyBtnStyle = IVStyle({
+      IColor(255, 30, 100, 60),          // kBG - green bg
+      IColor(255, 50, 140, 80),          // kFG - hover
+      IColor(255, 40, 120, 70),          // kPR - pressed
+      IColor(255, 60, 160, 90),          // kFR - frame
+      IColor(255, 50, 140, 80),          // kHL - highlight
       IColor(0, 0, 0, 0),               // kSH - no shadow
       Colors::TextWhite, Colors::TextWhite, Colors::TextWhite
     }).WithLabelText(IText(13.f, Colors::TextWhite, "Roboto-Regular"))
       .WithValueText(IText(13.f, Colors::TextWhite, "Roboto-Regular"))
-      .WithShowLabel(false).WithDrawFrame(false).WithDrawShadows(false).WithRoundness(0.2f);
+      .WithShowLabel(false).WithDrawFrame(true).WithDrawShadows(false).WithRoundness(4.f);
 
-    const IRECT startStopBounds = IRECT(mainPanelInner.L + 2.f, yPos + 16.f,
-                                         mainPanelInner.R - 2.f, yPos + statusHeight - 2.f);
-    pGraphics->AttachControl(
-      new IVToggleControl(startStopBounds, kParamEnabled, "", toggleStyle, "Start", "Stop"),
-      kCtrlTagStartStopButton
-    );
+    auto* pApplyBtn = new IVButtonControl(applyBounds,
+      [this](IControl* pCaller) {
+        ApplyCodecSettings();
+      },
+      "Apply", applyBtnStyle, true, false);
+    pGraphics->AttachControl(pApplyBtn, kCtrlTagApplyButton);
 
     //==========================================================================
     // Detail Settings Panel (Right Side) - Tabbed: Options / Log
@@ -691,13 +656,18 @@ CodecSim::CodecSim(const InstanceInfo& info)
     AddLogMessage("Detected: " + c->displayName + " (" + c->encoderName + ")");
 
   mConstructed = true;
+
+  DebugLogCodecSim("Host detected: " + std::to_string(static_cast<int>(GetHost())));
+
+  // Auto-initialize codec with default settings
+  ApplyCodecSettings();
+
   DebugLogCodecSim("Constructor - END");
 }
 
 CodecSim::~CodecSim()
 {
   SaveStandaloneState();
-  mEnabled.store(false, std::memory_order_relaxed); // signal init thread to stop
   if (mInitThread.joinable())
     mInitThread.join();
   std::lock_guard<std::recursive_mutex> lock(mCodecMutex);
@@ -723,7 +693,8 @@ int CodecSim::GetEffectiveBitrate()
 
 void CodecSim::OnReset()
 {
-  DebugLogCodecSim("OnReset START");
+  static int sResetCount = 0;
+  DebugLogCodecSim("OnReset #" + std::to_string(++sResetCount));
 
   int sampleRateIndex = GetParam(kParamSampleRate)->Int();
   if (sampleRateIndex >= 0 && sampleRateIndex < kNumSampleRatePresets)
@@ -732,14 +703,12 @@ void CodecSim::OnReset()
     mSampleRate = 48000;
   mNumChannels = 2;
 
-  bool enabled = GetParam(kParamEnabled)->Bool();
-  if (enabled)
-  {
-    std::lock_guard<std::recursive_mutex> lock(mCodecMutex);
-    InitializeCodec(mCurrentCodecIndex);
-  }
+  // Note: Do NOT call InitializeCodec here.
+  // OnReset is called by the host on playback start, sample rate change, and
+  // after SetLatency triggers a restart. Calling InitializeCodec here causes
+  // recursive re-initialization (SetLatency -> OnReset -> InitializeCodec -> SetLatency).
+  // Codec init is handled by the Apply button (ApplyCodecSettings) and auto-init in constructor.
 
-  DebugLogCodecSim("OnReset END");
 }
 
 void CodecSim::OnParamChange(int paramIdx)
@@ -753,7 +722,7 @@ void CodecSim::OnParamChange(int paramIdx)
       mCurrentCodecIndex = GetParam(kParamCodec)->Int();
       const CodecInfo* info = CodecRegistry::Instance().GetAvailableByIndex(mCurrentCodecIndex);
       if (info)
-        AddLogMessage("Codec: " + info->displayName + ". Press Start to apply.");
+        AddLogMessage("Codec: " + info->displayName + ". Press Apply.");
       UpdateBitrateForCodec(mCurrentCodecIndex);
       UpdateOptionsForCodec(mCurrentCodecIndex);
     }
@@ -763,15 +732,15 @@ void CodecSim::OnParamChange(int paramIdx)
       int presetIdx = GetParam(kParamBitrate)->Int();
       int numPresets = static_cast<int>(mCurrentBitratePresets.size());
       if (mCurrentCodecHasOther && presetIdx >= numPresets)
-        AddLogMessage("Bitrate: Other (custom). Press Start to apply.");
+        AddLogMessage("Bitrate: Other (custom). Press Apply.");
       else if (presetIdx < numPresets)
-        AddLogMessage("Bitrate: " + std::to_string(mCurrentBitratePresets[presetIdx]) + " kbps. Press Start to apply.");
+        AddLogMessage("Bitrate: " + std::to_string(mCurrentBitratePresets[presetIdx]) + " kbps. Press Apply.");
     }
     break;
     case kParamBitrateCustom:
     {
       int customBitrate = GetParam(kParamBitrateCustom)->Int();
-      AddLogMessage("Custom bitrate: " + std::to_string(customBitrate) + " kbps. Press Start to apply.");
+      AddLogMessage("Custom bitrate: " + std::to_string(customBitrate) + " kbps. Press Apply.");
     }
     break;
     case kParamSampleRate:
@@ -781,60 +750,12 @@ void CodecSim::OnParamChange(int paramIdx)
         mSampleRate = kSampleRatePresets[sampleRateIndex];
       else
         mSampleRate = 48000;
-      AddLogMessage("Sample rate: " + std::to_string(mSampleRate) + " Hz. Press Start to apply.");
+      AddLogMessage("Sample rate: " + std::to_string(mSampleRate) + " Hz");
     }
     break;
     case kParamEnabled:
-    {
-      bool enabled = GetParam(kParamEnabled)->Bool();
-      mEnabled.store(enabled, std::memory_order_relaxed);
-      DebugLogCodecSim("OnParamChange: Enabled=" + std::to_string(enabled));
-
-      // Join any previous background thread
-      if (mInitThread.joinable())
-        mInitThread.join();
-
-      mInitializing.store(true);
-
-      // Start spinner immediately (don't wait for OnIdle)
-      if (GetUI())
-      {
-        if (IControl* pSpinner = GetUI()->GetControlWithTag(kCtrlTagSpinner))
-          dynamic_cast<SpinnerOverlayControl*>(pSpinner)->StartSpinning();
-      }
-
-      if (enabled)
-      {
-        mCurrentCodecIndex = GetParam(kParamCodec)->Int();
-        AddLogMessage("Starting codec...");
-        mInitThread = std::thread([this, codecIdx = mCurrentCodecIndex]() {
-          InitializeCodec(codecIdx);
-          // Wait for first decoded audio output (ProcessBlock feeds data while we wait)
-          auto start = std::chrono::steady_clock::now();
-          while (mEnabled.load(std::memory_order_relaxed))
-          {
-            {
-              std::lock_guard<std::recursive_mutex> lock(mCodecMutex);
-              if (mCodecProcessor && mCodecProcessor->HasFirstAudioArrived())
-                break;
-            }
-            auto elapsed = std::chrono::steady_clock::now() - start;
-            if (elapsed > std::chrono::seconds(10)) break; // timeout
-            std::this_thread::sleep_for(std::chrono::milliseconds(50));
-          }
-          mInitializing.store(false);
-        });
-      }
-      else
-      {
-        AddLogMessage("Stopping codec...");
-        mInitThread = std::thread([this]() {
-          StopCodec();
-          mInitializing.store(false);
-        });
-      }
-    }
-    break;
+      // No longer used - codec is always active. Apply button handles re-init.
+      break;
     default:
       break;
   }
@@ -848,30 +769,6 @@ void CodecSim::OnIdle()
 {
   if (GetUI())
   {
-    bool isRunning = GetParam(kParamEnabled)->Bool();
-
-    // Update status panel color
-    if (IControl* pStatus = GetUI()->GetControlWithTag(kCtrlTagStatusDisplay))
-    {
-      auto* statusPanel = dynamic_cast<StatusPanelControl*>(pStatus);
-      if (statusPanel) statusPanel->SetEnabled(isRunning);
-    }
-
-    // Disable all settings controls while codec is running
-    if (IControl* pCodec = GetUI()->GetControlWithTag(kCtrlTagCodecSelector))
-      pCodec->SetDisabled(isRunning);
-    if (IControl* pBitrate = GetUI()->GetControlWithTag(kCtrlTagBitrateSelector))
-      pBitrate->SetDisabled(isRunning);
-    if (IControl* pSampleRate = GetUI()->GetControlWithTag(kCtrlTagSampleRateSelector))
-      pSampleRate->SetDisabled(isRunning);
-
-    // Disable option controls while codec is running
-    for (int i = 0; i < 5; i++)
-    {
-      if (IControl* p = GetUI()->GetControlWithTag(kCtrlTagOptionControl0 + i * 2))
-        p->SetDisabled(isRunning);
-    }
-
     // Show/hide loading spinner during initialization
     if (IControl* pSpinner = GetUI()->GetControlWithTag(kCtrlTagSpinner))
     {
@@ -903,7 +800,6 @@ void CodecSim::OnIdle()
       int numPresets = static_cast<int>(mCurrentBitratePresets.size());
       bool isOther = mCurrentCodecHasOther && (GetParam(kParamBitrate)->Int() >= numPresets);
       pCustomBitrate->Hide(hideBitrate || !isOther);
-      pCustomBitrate->SetDisabled(hideBitrate || !isOther || isRunning);
     }
 
     if (IControl* pLogCtrl = GetUI()->GetControlWithTag(kCtrlTagLogDisplay))
@@ -925,49 +821,98 @@ void CodecSim::OnIdle()
 
 void CodecSim::ProcessBlock(sample** inputs, sample** outputs, int nFrames)
 {
-  const int nChans = 2;
+  const int nOutChans = NOutChansConnected();
+  const int nInChans = NInChansConnected();
 
-  if (!mEnabled.load(std::memory_order_relaxed))
+  // Early diagnostic logging (first 50 calls)
+  static int sPBCount = 0;
+  const bool earlyLog = (sPBCount < 50);
+  if (earlyLog)
   {
-    for (int s = 0; s < nFrames; s++)
-      for (int c = 0; c < nChans; c++)
-        outputs[c][s] = 0.0;
-    return;
+    sPBCount++;
+    DebugLogCodecSim("PB#" + std::to_string(sPBCount) +
+                     " nF=" + std::to_string(nFrames) +
+                     " nIn=" + std::to_string(nInChans) +
+                     " nOut=" + std::to_string(nOutChans) +
+                     " proc=" + std::to_string(mCodecProcessor ? (mCodecProcessor->IsInitialized() ? 1 : 0) : -1) +
+                     " deque=" + std::to_string(mDecodedBuffer.size()));
   }
+
+  // Safety: clear all output channels first
+  for (int c = 0; c < nOutChans; c++)
+    for (int s = 0; s < nFrames; s++)
+      outputs[c][s] = 0.0;
 
   std::unique_lock<std::recursive_mutex> lock(mCodecMutex, std::try_to_lock);
 
-  if (!lock.owns_lock() || !mCodecProcessor || !mCodecProcessor->IsInitialized())
+  if (!lock.owns_lock())
   {
-    for (int s = 0; s < nFrames; s++)
-      for (int c = 0; c < nChans; c++)
-        outputs[c][s] = 0.0;
+    if (earlyLog) DebugLogCodecSim("  SKIP: lock failed");
     return;
   }
+  if (!mCodecProcessor)
+  {
+    if (earlyLog) DebugLogCodecSim("  SKIP: no processor");
+    return;
+  }
+  if (!mCodecProcessor->IsInitialized())
+  {
+    if (earlyLog) DebugLogCodecSim("  SKIP: not initialized");
+    return;
+  }
+
+  // Clamp nFrames to buffer capacity
+  const int maxFrames = 8192;
+  const int framesToProcess = (nFrames <= maxFrames) ? nFrames : maxFrames;
 
   float* inBuf = mInterleavedInput.data();
   float* outBuf = mInterleavedOutput.data();
 
-  for (int s = 0; s < nFrames; s++)
+  // Interleave input (handle mono or stereo)
+  for (int s = 0; s < framesToProcess; s++)
   {
-    inBuf[s * 2]     = static_cast<float>(inputs[0][s]);
-    inBuf[s * 2 + 1] = static_cast<float>(inputs[1][s]);
+    inBuf[s * 2]     = (nInChans > 0) ? static_cast<float>(inputs[0][s]) : 0.f;
+    inBuf[s * 2 + 1] = (nInChans > 1) ? static_cast<float>(inputs[1][s]) : inBuf[s * 2];
   }
 
-  int processedSamples = mCodecProcessor->Process(inBuf, nFrames, outBuf, nFrames);
+  // Write input to codec and drain all available decoded samples
+  int decodedFrames = mCodecProcessor->Process(inBuf, framesToProcess, outBuf, maxFrames);
 
-  for (int s = 0; s < nFrames; s++)
+  // Accumulate decoded samples into buffer (absorbs bursty pipeline)
+  for (int i = 0; i < decodedFrames * 2; i++)
+    mDecodedBuffer.push_back(outBuf[i]);
+
+  // Output from accumulation buffer (partial output: output whatever is available)
+  const size_t availablePairs = mDecodedBuffer.size() / 2;
+  const size_t framesToOutput = std::min(availablePairs, static_cast<size_t>(framesToProcess));
+
+  for (size_t s = 0; s < framesToOutput; s++)
   {
-    if (s < processedSamples)
-    {
-      outputs[0][s] = static_cast<sample>(outBuf[s * 2]);
-      outputs[1][s] = static_cast<sample>(outBuf[s * 2 + 1]);
-    }
-    else
-    {
-      outputs[0][s] = 0.0;
-      outputs[1][s] = 0.0;
-    }
+    float L = mDecodedBuffer.front(); mDecodedBuffer.pop_front();
+    float R = mDecodedBuffer.front(); mDecodedBuffer.pop_front();
+
+    if (nOutChans > 0) outputs[0][s] = static_cast<sample>(L);
+    if (nOutChans > 1) outputs[1][s] = static_cast<sample>(R);
+  }
+  // Remaining samples (framesToOutput..framesToProcess) stay zeroed from the initial clear
+
+  // Early diagnostic: log actual output values
+  if (earlyLog && framesToOutput > 0 && nOutChans > 0)
+  {
+    DebugLogCodecSim("  OUT: frames=" + std::to_string(framesToOutput) +
+                     " L[0]=" + std::to_string(outputs[0][0]) +
+                     (nOutChans > 1 ? " R[0]=" + std::to_string(outputs[1][0]) : ""));
+  }
+
+  // Debug: periodic logging of buffer state (every ~1 second at 48kHz/64 block size)
+  static int dbgCounter = 0;
+  if (++dbgCounter >= 750)
+  {
+    dbgCounter = 0;
+    DebugLogCodecSim("ProcessBlock: nFrames=" + std::to_string(nFrames) +
+                     " decoded=" + std::to_string(decodedFrames) +
+                     " bufSize=" + std::to_string(mDecodedBuffer.size() / 2) +
+                     " output=" + std::to_string(framesToOutput));
   }
 }
 
@@ -987,6 +932,8 @@ void CodecSim::InitializeCodec(int codecIndex)
     mCodecProcessor->Shutdown();
     mCodecProcessor.reset();
   }
+
+  mDecodedBuffer.clear();
 
   const CodecInfo* codecInfo = CodecRegistry::Instance().GetAvailableByIndex(codecIndex);
   if (!codecInfo)
@@ -1045,7 +992,48 @@ void CodecSim::StopCodec()
     mCodecProcessor.reset();
   }
 
+  mDecodedBuffer.clear();
+
   AddLogMessage("Codec stopped.");
+}
+
+void CodecSim::ApplyCodecSettings()
+{
+  DebugLogCodecSim("ApplyCodecSettings called");
+
+  // Join any previous background thread
+  if (mInitThread.joinable())
+    mInitThread.join();
+
+  mInitializing.store(true);
+
+  // Start spinner immediately
+  if (GetUI())
+  {
+    if (IControl* pSpinner = GetUI()->GetControlWithTag(kCtrlTagSpinner))
+      dynamic_cast<SpinnerOverlayControl*>(pSpinner)->StartSpinning();
+  }
+
+  mCurrentCodecIndex = GetParam(kParamCodec)->Int();
+  AddLogMessage("Applying codec settings...");
+
+  mInitThread = std::thread([this, codecIdx = mCurrentCodecIndex]() {
+    InitializeCodec(codecIdx);
+    // Wait for first decoded audio output
+    auto start = std::chrono::steady_clock::now();
+    while (true)
+    {
+      {
+        std::lock_guard<std::recursive_mutex> lock(mCodecMutex);
+        if (mCodecProcessor && mCodecProcessor->HasFirstAudioArrived())
+          break;
+      }
+      auto elapsed = std::chrono::steady_clock::now() - start;
+      if (elapsed > std::chrono::seconds(10)) break;
+      std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    mInitializing.store(false);
+  });
 }
 
 void CodecSim::UpdateBitrateForCodec(int codecIndex)
@@ -1578,8 +1566,8 @@ int CodecSim::UnserializeState(const IByteChunk& chunk, int startPos)
     pos = chunk.Get(&mDetailTabIndex, pos);
   }
 
-  // Always start stopped
-  GetParam(kParamEnabled)->Set(0);
+  // Keep enabled (codec is always active)
+  GetParam(kParamEnabled)->Set(1);
 
   DebugLogCodecSim("UnserializeState: restored codec=" + codecId +
                    " bitrate=" + std::to_string(bitrateKbps) +
