@@ -719,18 +719,27 @@ void CodecSim::OnParamChange(int paramIdx)
   switch (paramIdx) {
     case kParamCodec:
     {
-      mCurrentCodecIndex = GetParam(kParamCodec)->Int();
-      const CodecInfo* info = CodecRegistry::Instance().GetAvailableByIndex(mCurrentCodecIndex);
-      if (info)
-        AddLogMessage("Codec: " + info->displayName + ". Press Apply.");
-      UpdateBitrateForCodec(mCurrentCodecIndex);
-      UpdateOptionsForCodec(mCurrentCodecIndex);
+      int newCodecIndex = GetParam(kParamCodec)->Int();
+      // Only trigger update if codec ACTUALLY changed.
+      // Audacity re-sends all params after any value change, which would cause
+      // an infinite loop: UpdateBitrateForCodec → host resync → OnParamChange(kParamCodec) → repeat.
+      if (newCodecIndex != mCurrentCodecIndex)
+      {
+        mCurrentCodecIndex = newCodecIndex;
+        const CodecInfo* info = CodecRegistry::Instance().GetAvailableByIndex(mCurrentCodecIndex);
+        if (info)
+          AddLogMessage("Codec: " + info->displayName + ". Press Apply.");
+        // Defer UpdateBitrateForCodec/UpdateOptionsForCodec to OnIdle (UI thread).
+        mPendingCodecUpdate.store(true);
+      }
     }
     break;
     case kParamBitrate:
     {
       int presetIdx = GetParam(kParamBitrate)->Int();
+      double normVal = GetParam(kParamBitrate)->GetNormalized();
       int numPresets = static_cast<int>(mCurrentBitratePresets.size());
+      int nDisplayTexts = GetParam(kParamBitrate)->NDisplayTexts();
       if (mCurrentCodecHasOther && presetIdx >= numPresets)
         AddLogMessage("Bitrate: Other (custom). Press Apply.");
       else if (presetIdx < numPresets)
@@ -780,6 +789,14 @@ void CodecSim::OnIdle()
   {
     mLastApplyButtonState = -1; // Reset tracking when editor closes
     return;
+  }
+
+  // Handle deferred codec update (from OnParamChange on host thread)
+  if (mPendingCodecUpdate.exchange(false))
+  {
+    UpdateBitrateForCodec(mCurrentCodecIndex);
+    UpdateOptionsForCodec(mCurrentCodecIndex);
+    mLastBitrateDisplayStr.clear(); // Force display text refresh
   }
 
   // Update Apply button appearance based on pending changes (only when state changes)
@@ -862,8 +879,50 @@ void CodecSim::OnIdle()
   bool hideBitrate = mCurrentCodecIsLossless;
   if (IControl* pBitrateLabel = pUI->GetControlWithTag(kCtrlTagBitrateLabel))
     pBitrateLabel->Hide(hideBitrate);
-  if (IControl* pBitrate = pUI->GetControlWithTag(kCtrlTagBitrateSelector))
-    pBitrate->Hide(hideBitrate);
+  if (IControl* pBitrateCtrl = pUI->GetControlWithTag(kCtrlTagBitrateSelector))
+  {
+    pBitrateCtrl->Hide(hideBitrate);
+
+    // Force-sync the IVMenuButtonControl's displayed text with the parameter value.
+    // Only update when the display text actually changes (avoid redundant SetValueStr
+    // which can cause visual oscillation or host feedback loops).
+    if (!hideBitrate)
+    {
+      IParam* pBitrateParam = GetParam(kParamBitrate);
+      int bitrateIdx = pBitrateParam->Int();
+      int maxIdx = pBitrateParam->NDisplayTexts();
+      double paramNorm = pBitrateParam->GetNormalized();
+      double ctrlValue = pBitrateCtrl->GetValue();
+
+      // Bounds check: ensure the parameter index is within the enum range
+      if (bitrateIdx >= 0 && bitrateIdx < maxIdx)
+      {
+        WDL_String str;
+        pBitrateParam->GetDisplay(str);
+        const char* newText = str.Get();
+
+        // Only update the button text if it actually changed
+        if (mLastBitrateDisplayStr != newText)
+        {
+          mLastBitrateDisplayStr = newText;
+          if (auto* pContainer = dynamic_cast<IContainerBase*>(pBitrateCtrl))
+          {
+            if (pContainer->NChildren() > 0)
+            {
+              if (auto* pChildBtn = dynamic_cast<IVectorBase*>(pContainer->GetChild(0)))
+              {
+                pChildBtn->SetValueStr(newText);
+              }
+            }
+          }
+        }
+      }
+      else
+      {
+        // Out of bounds - skip display update
+      }
+    }
+  }
 
   // Show/hide custom bitrate input
   if (IControl* pCustomBitrate = pUI->GetControlWithTag(kCtrlTagBitrateCustom))
@@ -1206,14 +1265,14 @@ void CodecSim::UpdateBitrateForCodec(int codecIndex)
       info->defaultBitrate, info->minBitrate, info->maxBitrate, "kbps");
   }
 
-  // Directly update control display (avoids feedback loop via host parameter notifications)
-  if (IGraphics* pUI = GetUI())
+  // Notify the host of the new default bitrate value.
+  // We use SendParameterValueFromDelegate to properly update the host's cached value.
+  // Without this, the host would keep resending its old cached bitrate value.
+  // The infinite loop is prevented by the guard in OnParamChange(kParamCodec)
+  // which checks `newCodecIndex != mCurrentCodecIndex`.
   {
-    if (IControl* pCtrl = pUI->GetControlWithTag(kCtrlTagBitrateSelector))
-    {
-      double normVal = pBitrate->ToNormalized(static_cast<double>(defaultIdx));
-      pCtrl->SetValueFromDelegate(normVal, 0);
-    }
+    double normVal = pBitrate->ToNormalized(static_cast<double>(defaultIdx));
+    SendParameterValueFromDelegate(kParamBitrate, normVal, false);
   }
 }
 

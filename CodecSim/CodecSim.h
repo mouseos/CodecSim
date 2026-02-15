@@ -190,4 +190,11 @@ private:
 
   // UI state tracking (to avoid redundant updates in OnIdle)
   int mLastApplyButtonState = -1; // -1=unknown, 0=applied(green), 1=pending(orange)
+
+  // Deferred codec update: OnParamChange(kParamCodec) runs on host thread,
+  // but UpdateBitrateForCodec/UpdateOptionsForCodec must run on the UI thread.
+  std::atomic<bool> mPendingCodecUpdate{false};
+
+  // Cache the last bitrate display string to avoid redundant SetValueStr calls in OnIdle
+  std::string mLastBitrateDisplayStr;
 };
