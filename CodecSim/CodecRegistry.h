@@ -73,6 +73,8 @@ public:
   int GetAvailableCount() const;
   // Get codec by index into available-only list (0-based)
   const CodecInfo* GetAvailableByIndex(int index) const;
+  // Get available codec index by internal id (-1 if not found)
+  int GetAvailableIndexById(const std::string& id) const;
   // Get codec by internal id
   const CodecInfo* GetById(const std::string& id) const;
   // Check if detection has been performed

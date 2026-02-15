@@ -197,4 +197,8 @@ private:
 
   // Cache the last bitrate display string to avoid redundant SetValueStr calls in OnIdle
   std::string mLastBitrateDisplayStr;
+
+#ifdef CODECSIM_TRIAL
+  bool mTrialDialogShown = false; // Show purchase dialog only once per session
+#endif
 };

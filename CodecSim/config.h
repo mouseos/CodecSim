@@ -1,19 +1,32 @@
-#define PLUG_NAME "CodecSim"
+#ifdef CODECSIM_TRIAL
+  #define PLUG_NAME "CodecSim Trial"
+  #define PLUG_UNIQUE_ID 'CdST'
+  #define BUNDLE_NAME "CodecSimTrial"
+  #define SHARED_RESOURCES_SUBPATH "CodecSimTrial"
+  #define AAX_TYPE_IDS 'CdT1'
+  #define AAX_TYPE_IDS_AUDIOSUITE 'CdTA'
+  #define AAX_PLUG_NAME_STR "CodecSim Trial\nCodec Simulator Trial"
+#else
+  #define PLUG_NAME "CodecSim"
+  #define PLUG_UNIQUE_ID 'CdSm'
+  #define BUNDLE_NAME "CodecSim"
+  #define SHARED_RESOURCES_SUBPATH "CodecSim"
+  #define AAX_TYPE_IDS 'CdS1'
+  #define AAX_TYPE_IDS_AUDIOSUITE 'CdSA'
+  #define AAX_PLUG_NAME_STR "CodecSim\nCodec Simulator"
+#endif
+
 #define PLUG_MFR "MouseSoft"
 #define PLUG_VERSION_HEX 0x00010000
 #define PLUG_VERSION_STR "1.0.0"
-#define PLUG_UNIQUE_ID 'CdSm'
 #define PLUG_MFR_ID 'Mous'
 #define PLUG_URL_STR "https://mousesoft.booth.pm"
 #define PLUG_EMAIL_STR "support@mousesoft.example.com"
 #define PLUG_COPYRIGHT_STR "Copyright 2025 MouseSoft"
 #define PLUG_CLASS_NAME CodecSim
 
-#define BUNDLE_NAME "CodecSim"
 #define BUNDLE_MFR "MouseSoft"
 #define BUNDLE_DOMAIN "pm.booth.mousesoft"
-
-#define SHARED_RESOURCES_SUBPATH "CodecSim"
 
 #define PLUG_CHANNEL_IO "2-2"
 
@@ -41,10 +54,7 @@
 #define AUV2_VIEW_CLASS CodecSim_View
 #define AUV2_VIEW_CLASS_STR "CodecSim_View"
 
-#define AAX_TYPE_IDS 'CdS1'
-#define AAX_TYPE_IDS_AUDIOSUITE 'CdSA'
 #define AAX_PLUG_MFR_STR "MouseSoft"
-#define AAX_PLUG_NAME_STR "CodecSim\nCodec Simulator"
 #define AAX_PLUG_CATEGORY_STR "Effect"
 #define AAX_DOES_AUDIOSUITE 1
 

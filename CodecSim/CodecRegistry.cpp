@@ -688,6 +688,21 @@ const CodecInfo* CodecRegistry::GetAvailableByIndex(int index) const
   }
   return nullptr;
 }
+int CodecRegistry::GetAvailableIndexById(const std::string& id) const
+{
+  std::lock_guard<std::mutex> lock(mMutex);
+  int current = 0;
+  for (const auto& codec : mCodecs)
+  {
+    if (codec.available)
+    {
+      if (codec.id == id)
+        return current;
+      current++;
+    }
+  }
+  return -1;
+}
 const CodecInfo* CodecRegistry::GetById(const std::string& id) const
 {
   std::lock_guard<std::mutex> lock(mMutex);

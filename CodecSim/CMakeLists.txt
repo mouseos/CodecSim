@@ -23,6 +23,18 @@ iplug_add_plugin(${PROJECT_NAME}
     VST3 APP
 )
 
+# Trial version option
+option(CODECSIM_TRIAL "Build trial version (MP3 only)" OFF)
+if(CODECSIM_TRIAL)
+  message(STATUS "Building TRIAL version (MP3 only)")
+  if(TARGET ${PROJECT_NAME}-app)
+    target_compile_definitions(${PROJECT_NAME}-app PRIVATE CODECSIM_TRIAL=1)
+  endif()
+  if(TARGET ${PROJECT_NAME}-vst3)
+    target_compile_definitions(${PROJECT_NAME}-vst3 PRIVATE CODECSIM_TRIAL=1)
+  endif()
+endif()
+
 # Embed font resources in VST3 DLL (iPlug2 CMake only adds .rc to APP target)
 if(WIN32 AND TARGET ${PROJECT_NAME}-vst3)
   set(_rc_file "${CMAKE_CURRENT_SOURCE_DIR}/resources/main.rc")

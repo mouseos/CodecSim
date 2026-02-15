@@ -11,6 +11,7 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#include <shellapi.h>
 #include <debugapi.h>
 #include <cstdio>
 
@@ -299,7 +300,7 @@ CodecSim::CodecSim(const InstanceInfo& info)
     const IRECT titleTextBounds = titleBarBounds.GetFromLeft(200.f).GetPadded(-Layout::Padding);
 
     pGraphics->AttachControl(
-      new ITextControl(titleTextBounds, "CodecSim",
+      new ITextControl(titleTextBounds, PLUG_NAME,
         IText(24.f, Colors::TextWhite, "Roboto-Regular", EAlign::Near, EVAlign::Middle)),
       kCtrlTagTitle
     );
@@ -372,7 +373,7 @@ CodecSim::CodecSim(const InstanceInfo& info)
               std::string name = pItem->GetText();
 #ifdef _WIN32
               std::string msg = "Delete preset \"" + name + "\"?";
-              int ret = MessageBoxA(NULL, msg.c_str(), "CodecSim", MB_YESNO | MB_ICONQUESTION);
+              int ret = MessageBoxA(NULL, msg.c_str(), PLUG_NAME, MB_YESNO | MB_ICONQUESTION);
               if (ret != IDYES) return;
 #endif
               DeleteUserPreset(name);
@@ -725,6 +726,35 @@ void CodecSim::OnParamChange(int paramIdx)
       // an infinite loop: UpdateBitrateForCodec → host resync → OnParamChange(kParamCodec) → repeat.
       if (newCodecIndex != mCurrentCodecIndex)
       {
+#ifdef CODECSIM_TRIAL
+        // Trial: only MP3 is allowed
+        const CodecInfo* trialCheck = CodecRegistry::Instance().GetAvailableByIndex(newCodecIndex);
+        if (trialCheck && trialCheck->id != "mp3")
+        {
+          int mp3Index = CodecRegistry::Instance().GetAvailableIndexById("mp3");
+          if (mp3Index < 0) mp3Index = 0;
+          GetParam(kParamCodec)->Set(mp3Index);
+          SendParameterValueFromDelegate(kParamCodec,
+            GetParam(kParamCodec)->ToNormalized(static_cast<double>(mp3Index)), false);
+          mCurrentCodecIndex = mp3Index;
+          mPendingCodecUpdate.store(true);
+          if (!mTrialDialogShown)
+          {
+            mTrialDialogShown = true;
+#ifdef _WIN32
+            int ret = MessageBoxA(NULL,
+              "This is the trial version of CodecSim.\n"
+              "Only MP3 codec is available.\n\n"
+              "To unlock all codecs, please purchase the full version.\n\n"
+              "Open the store page?",
+              "CodecSim Trial", MB_YESNO | MB_ICONINFORMATION);
+            if (ret == IDYES)
+              ShellExecuteA(NULL, "open", "https://mousesoft.booth.pm/", NULL, NULL, SW_SHOWNORMAL);
+#endif
+          }
+          break;
+        }
+#endif
         mCurrentCodecIndex = newCodecIndex;
         const CodecInfo* info = CodecRegistry::Instance().GetAvailableByIndex(mCurrentCodecIndex);
         if (info)
@@ -1154,6 +1184,25 @@ void CodecSim::ApplyCodecSettings()
   }
 
   mCurrentCodecIndex = GetParam(kParamCodec)->Int();
+
+#ifdef CODECSIM_TRIAL
+  {
+    const CodecInfo* checkInfo = CodecRegistry::Instance().GetAvailableByIndex(mCurrentCodecIndex);
+    if (checkInfo && checkInfo->id != "mp3")
+    {
+      int mp3Index = CodecRegistry::Instance().GetAvailableIndexById("mp3");
+      if (mp3Index >= 0)
+      {
+        mCurrentCodecIndex = mp3Index;
+        GetParam(kParamCodec)->Set(mp3Index);
+        SendParameterValueFromDelegate(kParamCodec,
+          GetParam(kParamCodec)->ToNormalized(static_cast<double>(mp3Index)), false);
+        UpdateBitrateForCodec(mp3Index);
+      }
+    }
+  }
+#endif
+
   AddLogMessage("Applying codec settings...");
 
   mInitThread = std::thread([this, codecIdx = mCurrentCodecIndex]() {
@@ -1652,7 +1701,19 @@ int CodecSim::UnserializeState(const IByteChunk& chunk, int startPos)
     if (available[i]->id == codecId) { codecIndex = i; break; }
   }
   mCurrentCodecIndex = codecIndex;
-  GetParam(kParamCodec)->Set(codecIndex);
+
+#ifdef CODECSIM_TRIAL
+  {
+    const CodecInfo* restoredInfo = CodecRegistry::Instance().GetAvailableByIndex(mCurrentCodecIndex);
+    if (restoredInfo && restoredInfo->id != "mp3")
+    {
+      int mp3Index = CodecRegistry::Instance().GetAvailableIndexById("mp3");
+      mCurrentCodecIndex = (mp3Index >= 0) ? mp3Index : 0;
+    }
+  }
+#endif
+
+  GetParam(kParamCodec)->Set(mCurrentCodecIndex);
 
   // Read semantic bitrate
   int bitrateKbps = 128;
@@ -1754,12 +1815,24 @@ std::string CodecSim::GetAppDataPath()
 #ifdef _WIN32
   const char* appdata = getenv("APPDATA");
   if (appdata)
+  {
+#ifdef CODECSIM_TRIAL
+    return std::string(appdata) + "\\CodecSimTrial\\";
+#else
     return std::string(appdata) + "\\CodecSim\\";
+#endif
+  }
   return ".\\";
 #else
   const char* home = getenv("HOME");
   if (home)
+  {
+#ifdef CODECSIM_TRIAL
+    return std::string(home) + "/Library/Application Support/CodecSimTrial/";
+#else
     return std::string(home) + "/Library/Application Support/CodecSim/";
+#endif
+  }
   return "./";
 #endif
 }
