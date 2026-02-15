@@ -305,6 +305,32 @@ CodecSim::CodecSim(const InstanceInfo& info)
       kCtrlTagTitle
     );
 
+#ifdef CODECSIM_TRIAL
+    // "Buy" button in title bar (Trial only)
+    {
+      const IVStyle buyBtnStyle = IVStyle({
+        IColor(0, 0, 0, 0),               // kBG - transparent (no square background)
+        IColor(255, 220, 160, 50),         // kFG - gold hover
+        IColor(255, 180, 120, 30),         // kPR - pressed
+        IColor(255, 200, 140, 40),         // kFR - gold frame
+        IColor(255, 200, 140, 40),         // kHL - highlight
+        IColor(0, 0, 0, 0),               // kSH - no shadow
+        Colors::TextWhite, Colors::TextWhite, Colors::TextWhite
+      }).WithLabelText(IText(12.f, Colors::TextWhite, "Roboto-Regular"))
+        .WithValueText(IText(12.f, Colors::TextWhite, "Roboto-Regular"))
+        .WithDrawFrame(true).WithDrawShadows(false).WithRoundness(4.f);
+
+      const IRECT buyBtnBounds = IRECT(210.f, titleBarBounds.T + 8.f, 280.f, titleBarBounds.B - 8.f);
+      pGraphics->AttachControl(new IVButtonControl(buyBtnBounds,
+        [](IControl* pCaller) {
+#ifdef _WIN32
+          ShellExecuteA(NULL, "open", "https://mousesoft.booth.pm/", NULL, NULL, SW_SHOWNORMAL);
+#endif
+        },
+        "Buy", buyBtnStyle, true, false));
+    }
+#endif
+
     // Preset selector - flat text style (dropdown indicator via label)
     const IVStyle presetStyle = IVStyle({
       Colors::Background,              // kBG - match title bar
@@ -846,7 +872,7 @@ void CodecSim::OnIdle()
           {
             // Orange: unapplied changes exist
             const IVStyle pendingStyle = IVStyle({
-              IColor(255, 180, 120, 30),
+              IColor(0, 0, 0, 0),
               IColor(255, 210, 150, 50),
               IColor(255, 160, 100, 20),
               IColor(255, 220, 160, 60),
@@ -863,7 +889,7 @@ void CodecSim::OnIdle()
           {
             // Green: all changes applied
             const IVStyle appliedStyle = IVStyle({
-              IColor(255, 30, 100, 60),
+              IColor(0, 0, 0, 0),
               IColor(255, 50, 140, 80),
               IColor(255, 40, 120, 70),
               IColor(255, 60, 160, 90),
