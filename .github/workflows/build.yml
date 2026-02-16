@@ -22,6 +22,20 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Cache iPlug2 SDKs
+        id: cache-sdks
+        uses: actions/cache@v4
+        with:
+          path: iPlug2/Dependencies/IPlug/VST3_SDK
+          key: iplug2-vst3sdk-${{ runner.os }}-${{ hashFiles('iPlug2/Dependencies/IPlug/download-vst3-sdk.sh') }}
+
+      - name: Download VST3 SDK
+        if: steps.cache-sdks.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          cd iPlug2/Dependencies/IPlug
+          ./download-vst3-sdk.sh
+
       - name: Apply iPlug2 VST3 bus activation fix
         shell: bash
         run: |
