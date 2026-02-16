@@ -36,16 +36,21 @@ jobs:
           cd iPlug2/Dependencies/IPlug
           ./download-vst3-sdk.sh
 
-      - name: Apply iPlug2 VST3 bus activation fix
+      - name: Apply iPlug2 patches
         shell: bash
         run: |
+          # 1. VST3 bus activation fix (Audacity compatibility)
           FILE="iPlug2/IPlug/VST3/IPlugVST3_ProcessorBase.h"
-          # Fix input bus: capture return value and call setActive
           sed -i 's|pPlug->addAudioInput(tmpStringBuf, arr, (BusTypes) inBusIdx > 0, flags);|auto* inBus = pPlug->addAudioInput(tmpStringBuf, arr, (BusTypes) inBusIdx > 0, flags);\n        if (flags \& BusInfo::BusFlags::kDefaultActive)\n          inBus->setActive(true);|' "$FILE"
-          # Fix output bus: capture return value and call setActive
           sed -i 's|pPlug->addAudioOutput(tmpStringBuf, arr, (BusTypes) outBusIdx > 0, flags);|auto* outBus = pPlug->addAudioOutput(tmpStringBuf, arr, (BusTypes) outBusIdx > 0, flags);\n        if (flags \& BusInfo::BusFlags::kDefaultActive)\n          outBus->setActive(true);|' "$FILE"
-          echo "Patch applied. Verifying..."
+          echo "Bus activation fix applied:"
           grep -n "setActive" "$FILE"
+
+          # 2. Add ClearDisplayTexts() method to IParam
+          FILE2="iPlug2/IPlug/IPlugParameter.h"
+          sed -i '/MapDisplayText/a\  /** Clear all display texts *\/\n  void ClearDisplayTexts() { mDisplayTexts.Resize(0); }' "$FILE2"
+          echo "ClearDisplayTexts added:"
+          grep -n "ClearDisplayTexts" "$FILE2"
 
       - name: Download FFmpeg LGPL shared build
         shell: pwsh
