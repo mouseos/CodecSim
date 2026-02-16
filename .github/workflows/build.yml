@@ -23,9 +23,10 @@ jobs:
           submodules: recursive
 
       - name: Apply iPlug2 patches
+        shell: bash
         run: |
           cd iPlug2
-          git apply ../patches/iplug2-vst3-bus-activation.patch
+          git apply --verbose ../patches/iplug2-vst3-bus-activation.patch
 
       - name: Download FFmpeg LGPL shared build
         shell: pwsh
