@@ -7,6 +7,7 @@
 #ifndef MyAppVersion
   #define MyAppVersion "0.0.1"
 #endif
+#define MyAppVersionNum Copy(MyAppVersion, 1, Pos("-", MyAppVersion + "-") - 1)
 #define MyAppPublisher "MouseSoft"
 #define MyAppURL "https://mousesoft.booth.pm/"
 #define MyAppExeName "CodecSim.exe"
@@ -34,10 +35,10 @@ OutputDir=..\build\installer
 SetupIconFile=compiler:SetupClassicIcon.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 WizardStyle=modern
-VersionInfoVersion={#MyAppVersion}
+VersionInfoVersion={#MyAppVersionNum}
 VersionInfoCompany={#MyAppPublisher}
 VersionInfoProductName={#MyAppName}
-VersionInfoProductVersion={#MyAppVersion}
+VersionInfoProductVersion={#MyAppVersionNum}
 
 [Languages]
 Name: "japanese"; MessagesFile: "compiler:Languages\Japanese.isl"
