@@ -22,11 +22,16 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Apply iPlug2 patches
+      - name: Apply iPlug2 VST3 bus activation fix
         shell: bash
         run: |
-          cd iPlug2
-          git apply --verbose ../patches/iplug2-vst3-bus-activation.patch
+          FILE="iPlug2/IPlug/VST3/IPlugVST3_ProcessorBase.h"
+          # Fix input bus: capture return value and call setActive
+          sed -i 's|pPlug->addAudioInput(tmpStringBuf, arr, (BusTypes) inBusIdx > 0, flags);|auto* inBus = pPlug->addAudioInput(tmpStringBuf, arr, (BusTypes) inBusIdx > 0, flags);\n        if (flags \& BusInfo::BusFlags::kDefaultActive)\n          inBus->setActive(true);|' "$FILE"
+          # Fix output bus: capture return value and call setActive
+          sed -i 's|pPlug->addAudioOutput(tmpStringBuf, arr, (BusTypes) outBusIdx > 0, flags);|auto* outBus = pPlug->addAudioOutput(tmpStringBuf, arr, (BusTypes) outBusIdx > 0, flags);\n        if (flags \& BusInfo::BusFlags::kDefaultActive)\n          outBus->setActive(true);|' "$FILE"
+          echo "Patch applied. Verifying..."
+          grep -n "setActive" "$FILE"
 
       - name: Download FFmpeg LGPL shared build
         shell: pwsh
