@@ -4,7 +4,9 @@
 ; https://mousesoft.booth.pm/
 
 #define MyAppName "CodecSim"
-#define MyAppVersion "1.0.0"
+#ifndef MyAppVersion
+  #define MyAppVersion "0.0.1"
+#endif
 #define MyAppPublisher "MouseSoft"
 #define MyAppURL "https://mousesoft.booth.pm/"
 #define MyAppExeName "CodecSim.exe"
@@ -20,7 +22,7 @@ AppSupportURL={#MyAppURL}
 AppUpdatesURL={#MyAppURL}
 DefaultDirName={commonpf}\CodecSim
 DefaultGroupName={#MyAppName}
-OutputBaseFilename=CodecSim_Setup
+OutputBaseFilename=CodecSim_Setup_{#MyAppVersion}
 Compression=lzma2/ultra64
 SolidCompression=yes
 LZMANumBlockThreads=4

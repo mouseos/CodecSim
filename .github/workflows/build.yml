@@ -109,23 +109,33 @@ jobs:
       - name: Setup Inno Setup
         uses: egor-tensin/setup-inno-setup@v1
 
+      - name: Get version from tag
+        id: version
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "VERSION=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "VERSION=0.0.0-dev" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Build Full installer
-        run: iscc installer/CodecSim_Full.iss
+        run: iscc /DMyAppVersion="${{ steps.version.outputs.VERSION }}" installer/CodecSim_Full.iss
 
       - name: Build Trial installer
-        run: iscc installer/CodecSim_Trial.iss
+        run: iscc /DMyAppVersion="${{ steps.version.outputs.VERSION }}" installer/CodecSim_Trial.iss
 
       - name: Upload Full installer artifact
         uses: actions/upload-artifact@v4
         with:
           name: CodecSim-Setup
-          path: build/installer/CodecSim_Setup.exe
+          path: build/installer/CodecSim_Setup_*.exe
 
       - name: Upload Trial installer artifact
         uses: actions/upload-artifact@v4
         with:
           name: CodecSimTrial-Setup
-          path: build/installer/CodecSimTrial_Setup.exe
+          path: build/installer/CodecSimTrial_Setup_*.exe
 
   # ---------------------------------------------------------------------------
   # Job 3: Release (create draft GitHub Release, tag builds only)
@@ -209,5 +219,5 @@ jobs:
           files: |
             CodecSim-${{ steps.version.outputs.VERSION }}-Trial.zip
             CodecSim-${{ steps.version.outputs.VERSION }}-Paid.zip
-            installers/CodecSim_Setup.exe
-            installers/CodecSimTrial_Setup.exe
+            installers/CodecSim_Setup_*.exe
+            installers/CodecSimTrial_Setup_*.exe

@@ -17,8 +17,8 @@
 #endif
 
 #define PLUG_MFR "MouseSoft"
-#define PLUG_VERSION_HEX 0x00010000
-#define PLUG_VERSION_STR "1.0.0"
+#define PLUG_VERSION_HEX 0x00000001
+#define PLUG_VERSION_STR "0.0.1"
 #define PLUG_MFR_ID 'Mous'
 #define PLUG_URL_STR "https://mousesoft.booth.pm"
 #define PLUG_EMAIL_STR "support@mousesoft.example.com"
