@@ -1,0 +1,3 @@
+CodecSim Trial はMP3コーデックのみ対応の体験版です。
+全コーデックを使用するには製品版をご購入ください。
+https://mousesoft.booth.pm/

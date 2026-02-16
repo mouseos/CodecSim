@@ -222,6 +222,11 @@ CodecSim::CodecSim(const InstanceInfo& info)
     GetParam(kParamSampleRate)->SetDisplayText(i, label);
   }
 
+  // Channel mode selector: 0=Stereo, 1=Mono
+  GetParam(kParamChannels)->InitEnum("Channels", 0, 2);
+  GetParam(kParamChannels)->SetDisplayText(0, "Stereo");
+  GetParam(kParamChannels)->SetDisplayText(1, "Mono");
+
   // Enabled parameter (kept for state compatibility, always true)
   GetParam(kParamEnabled)->InitBool("Enabled", true);
 
@@ -583,6 +588,19 @@ CodecSim::CodecSim(const InstanceInfo& info)
             sampleRateSelectorBounds.R - 8.f, sampleRateSelectorBounds.B - 5.f)));
     yPos += Layout::CodecSelectorHeight + Layout::SectionSpacing;
 
+    // Section: Channel Mode (Stereo / Mono)
+    const IRECT channelLabelBounds = IRECT(mainPanelInner.L, yPos, mainPanelInner.R, yPos + Layout::LabelHeight);
+    pGraphics->AttachControl(new ITextControl(channelLabelBounds, "Channel",
+      IText(14.f, Colors::TextGray, "Roboto-Regular", EAlign::Near)));
+    yPos += Layout::LabelHeight + 5.f;
+
+    const IRECT channelSelectorBounds = IRECT(mainPanelInner.L, yPos, mainPanelInner.R, yPos + Layout::CodecSelectorHeight);
+    pGraphics->AttachControl(
+      new IVTabSwitchControl(channelSelectorBounds, kParamChannels,
+        {"Stereo", "Mono"}, "", tabStyle),
+      kCtrlTagChannelSelector);
+    yPos += Layout::CodecSelectorHeight + Layout::SectionSpacing;
+
     // Section: Apply Button
     const float applyHeight = Layout::CodecSelectorHeight;
     const IRECT applyBounds = IRECT(mainPanelInner.L, yPos, mainPanelInner.R, yPos + applyHeight);
@@ -728,7 +746,10 @@ void CodecSim::OnReset()
     mSampleRate = kSampleRatePresets[sampleRateIndex];
   else
     mSampleRate = 48000;
-  mNumChannels = 2;
+  {
+    int channelMode = GetParam(kParamChannels)->Int();
+    mNumChannels = (channelMode == 0) ? 2 : 1;
+  }
 
   // Note: Do NOT call InitializeCodec here.
   // OnReset is called by the host on playback start, sample rate change, and
@@ -818,6 +839,22 @@ void CodecSim::OnParamChange(int paramIdx)
       AddLogMessage("Sample rate: " + std::to_string(mSampleRate) + " Hz");
     }
     break;
+    case kParamChannels:
+    {
+      int channelMode = GetParam(kParamChannels)->Int();
+      mNumChannels = (channelMode == 0) ? 2 : 1;
+      // Guard: force mono for mono-only codecs
+      const CodecInfo* chInfo = CodecRegistry::Instance().GetAvailableByIndex(mCurrentCodecIndex);
+      if (chInfo && chInfo->monoOnly && mNumChannels != 1)
+      {
+        mNumChannels = 1;
+        GetParam(kParamChannels)->Set(1);
+        SendParameterValueFromDelegate(kParamChannels,
+          GetParam(kParamChannels)->ToNormalized(1.0), false);
+      }
+      AddLogMessage("Channels: " + std::string(mNumChannels == 1 ? "Mono" : "Stereo") + ". Press Apply.");
+    }
+    break;
     case kParamEnabled:
       // No longer used - codec is always active. Apply button handles re-init.
       break;
@@ -827,7 +864,8 @@ void CodecSim::OnParamChange(int paramIdx)
 
   // Mark pending changes for codec/bitrate/samplerate
   if (paramIdx == kParamCodec || paramIdx == kParamBitrate ||
-      paramIdx == kParamBitrateCustom || paramIdx == kParamSampleRate)
+      paramIdx == kParamBitrateCustom || paramIdx == kParamSampleRate ||
+      paramIdx == kParamChannels)
   {
     mPendingApply.store(true);
   }
@@ -852,6 +890,7 @@ void CodecSim::OnIdle()
   {
     UpdateBitrateForCodec(mCurrentCodecIndex);
     UpdateOptionsForCodec(mCurrentCodecIndex);
+    UpdateChannelSelectorForCodec(mCurrentCodecIndex);
     mLastBitrateDisplayStr.clear(); // Force display text refresh
   }
 
@@ -1056,32 +1095,60 @@ void CodecSim::ProcessBlock(sample** inputs, sample** outputs, int nFrames)
 
   float* inBuf = mInterleavedInput.data();
   float* outBuf = mInterleavedOutput.data();
+  const int numCh = mNumChannels; // Capture locally (1=mono, 2=stereo)
 
-  // Interleave input (handle mono or stereo)
-  for (int s = 0; s < framesToProcess; s++)
+  // Interleave input based on channel mode
+  if (numCh == 1)
   {
-    inBuf[s * 2]     = (nInChans > 0) ? static_cast<float>(inputs[0][s]) : 0.f;
-    inBuf[s * 2 + 1] = (nInChans > 1) ? static_cast<float>(inputs[1][s]) : inBuf[s * 2];
+    // Mono: downmix L+R to single channel
+    for (int s = 0; s < framesToProcess; s++)
+    {
+      float L = (nInChans > 0) ? static_cast<float>(inputs[0][s]) : 0.f;
+      float R = (nInChans > 1) ? static_cast<float>(inputs[1][s]) : L;
+      inBuf[s] = (L + R) * 0.5f;
+    }
+  }
+  else
+  {
+    // Stereo: interleave L/R
+    for (int s = 0; s < framesToProcess; s++)
+    {
+      inBuf[s * 2]     = (nInChans > 0) ? static_cast<float>(inputs[0][s]) : 0.f;
+      inBuf[s * 2 + 1] = (nInChans > 1) ? static_cast<float>(inputs[1][s]) : inBuf[s * 2];
+    }
   }
 
   // Write input to codec and drain all available decoded samples
   int decodedFrames = mCodecProcessor->Process(inBuf, framesToProcess, outBuf, maxFrames);
 
   // Accumulate decoded samples into buffer (absorbs bursty pipeline)
-  for (int i = 0; i < decodedFrames * 2; i++)
+  for (int i = 0; i < decodedFrames * numCh; i++)
     mDecodedBuffer.push_back(outBuf[i]);
 
-  // Output from accumulation buffer (partial output: output whatever is available)
-  const size_t availablePairs = mDecodedBuffer.size() / 2;
-  const size_t framesToOutput = std::min(availablePairs, static_cast<size_t>(framesToProcess));
+  // Output from accumulation buffer
+  const size_t availableFrames = mDecodedBuffer.size() / numCh;
+  const size_t framesToOutput = std::min(availableFrames, static_cast<size_t>(framesToProcess));
 
-  for (size_t s = 0; s < framesToOutput; s++)
+  if (numCh == 1)
   {
-    float L = mDecodedBuffer.front(); mDecodedBuffer.pop_front();
-    float R = mDecodedBuffer.front(); mDecodedBuffer.pop_front();
-
-    if (nOutChans > 0) outputs[0][s] = static_cast<sample>(L);
-    if (nOutChans > 1) outputs[1][s] = static_cast<sample>(R);
+    // Mono output: duplicate to both L and R channels
+    for (size_t s = 0; s < framesToOutput; s++)
+    {
+      float M = mDecodedBuffer.front(); mDecodedBuffer.pop_front();
+      if (nOutChans > 0) outputs[0][s] = static_cast<sample>(M);
+      if (nOutChans > 1) outputs[1][s] = static_cast<sample>(M);
+    }
+  }
+  else
+  {
+    // Stereo output: de-interleave L/R
+    for (size_t s = 0; s < framesToOutput; s++)
+    {
+      float L = mDecodedBuffer.front(); mDecodedBuffer.pop_front();
+      float R = mDecodedBuffer.front(); mDecodedBuffer.pop_front();
+      if (nOutChans > 0) outputs[0][s] = static_cast<sample>(L);
+      if (nOutChans > 1) outputs[1][s] = static_cast<sample>(R);
+    }
   }
   // Remaining samples (framesToOutput..framesToProcess) stay zeroed from the initial clear
 
@@ -1100,7 +1167,7 @@ void CodecSim::ProcessBlock(sample** inputs, sample** outputs, int nFrames)
     dbgCounter = 0;
     DebugLogCodecSim("ProcessBlock: nFrames=" + std::to_string(nFrames) +
                      " decoded=" + std::to_string(decodedFrames) +
-                     " bufSize=" + std::to_string(mDecodedBuffer.size() / 2) +
+                     " bufSize=" + std::to_string(mDecodedBuffer.size() / mNumChannels) +
                      " output=" + std::to_string(framesToOutput));
   }
 }
@@ -1210,6 +1277,15 @@ void CodecSim::ApplyCodecSettings()
   }
 
   mCurrentCodecIndex = GetParam(kParamCodec)->Int();
+
+  // Update channel count from parameter
+  {
+    int channelMode = GetParam(kParamChannels)->Int();
+    mNumChannels = (channelMode == 0) ? 2 : 1;
+    const CodecInfo* applyInfo = CodecRegistry::Instance().GetAvailableByIndex(mCurrentCodecIndex);
+    if (applyInfo && applyInfo->monoOnly)
+      mNumChannels = 1;
+  }
 
 #ifdef CODECSIM_TRIAL
   {
@@ -1348,6 +1424,32 @@ void CodecSim::UpdateBitrateForCodec(int codecIndex)
   {
     double normVal = pBitrate->ToNormalized(static_cast<double>(defaultIdx));
     SendParameterValueFromDelegate(kParamBitrate, normVal, false);
+  }
+}
+
+void CodecSim::UpdateChannelSelectorForCodec(int codecIndex)
+{
+  const CodecInfo* info = CodecRegistry::Instance().GetAvailableByIndex(codecIndex);
+  if (!info) return;
+
+  if (info->monoOnly)
+  {
+    // Force mono for mono-only codec
+    mNumChannels = 1;
+    GetParam(kParamChannels)->Set(1);
+    SendParameterValueFromDelegate(kParamChannels,
+      GetParam(kParamChannels)->ToNormalized(1.0), false);
+  }
+
+  // Enable/disable the UI control
+  IGraphics* pUI = GetUI();
+  if (pUI)
+  {
+    if (IControl* pChannelCtrl = pUI->GetControlWithTag(kCtrlTagChannelSelector))
+    {
+      pChannelCtrl->SetDisabled(info->monoOnly);
+      pChannelCtrl->SetDirty(false);
+    }
   }
 }
 
@@ -1632,7 +1734,7 @@ void CodecSim::AddLogMessage(const std::string& msg)
 //==============================================================================
 
 static constexpr int kStateMagic = 0x43534D31; // 'CSM1'
-static constexpr int kStateVersion = 1;
+static constexpr int kStateVersion = 2;
 
 bool CodecSim::SerializeState(IByteChunk& chunk) const
 {
@@ -1661,6 +1763,10 @@ bool CodecSim::SerializeState(IByteChunk& chunk) const
   int sampleRateHz = (sampleRateIdx >= 0 && sampleRateIdx < kNumSampleRatePresets)
     ? kSampleRatePresets[sampleRateIdx] : 48000;
   chunk.Put(&sampleRateHz);
+
+  // Channel mode (v2+)
+  int channelMode = GetParam(kParamChannels)->Int();
+  chunk.Put(&channelMode);
 
   // Codec option values
   int numOptions = static_cast<int>(mCodecOptionValues.size());
@@ -1775,6 +1881,26 @@ int CodecSim::UnserializeState(const IByteChunk& chunk, int startPos)
   GetParam(kParamSampleRate)->Set(sampleRateIdx);
   mSampleRate = sampleRateHz;
 
+  // Read channel mode (v2+)
+  if (version >= 2)
+  {
+    int channelMode = 0;
+    pos = chunk.Get(&channelMode, pos);
+    if (pos < 0) return pos;
+    const CodecInfo* chInfo = CodecRegistry::Instance().GetAvailableByIndex(mCurrentCodecIndex);
+    if (chInfo && chInfo->monoOnly) channelMode = 1;
+    GetParam(kParamChannels)->Set(channelMode);
+    mNumChannels = (channelMode == 0) ? 2 : 1;
+  }
+  else
+  {
+    // Legacy state v1: default based on codec
+    const CodecInfo* chInfo = CodecRegistry::Instance().GetAvailableByIndex(mCurrentCodecIndex);
+    int channelMode = (chInfo && chInfo->monoOnly) ? 1 : 0;
+    GetParam(kParamChannels)->Set(channelMode);
+    mNumChannels = (channelMode == 0) ? 2 : 1;
+  }
+
   // Read codec option values
   int numOptions = 0;
   pos = chunk.Get(&numOptions, pos);
@@ -1818,6 +1944,7 @@ void CodecSim::OnRestoreState()
   {
     // Rebuild options UI for the restored codec
     UpdateOptionsForCodec(mCurrentCodecIndex);
+    UpdateChannelSelectorForCodec(mCurrentCodecIndex);
 
     // Refresh bitrate selector display
     if (IControl* pCtrl = GetUI()->GetControlWithTag(kCtrlTagBitrateSelector))

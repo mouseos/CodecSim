@@ -39,14 +39,14 @@
 #define PLUG_DOES_STATE_CHUNKS 1
 #define PLUG_HAS_UI 1
 #define PLUG_WIDTH 600
-#define PLUG_HEIGHT 400
+#define PLUG_HEIGHT 460
 #define PLUG_FPS 60
 #define PLUG_SHARED_RESOURCES 0
 #define PLUG_HOST_RESIZE 0
 #define PLUG_MIN_WIDTH 600
-#define PLUG_MIN_HEIGHT 400
+#define PLUG_MIN_HEIGHT 460
 #define PLUG_MAX_WIDTH 600
-#define PLUG_MAX_HEIGHT 400
+#define PLUG_MAX_HEIGHT 460
 
 #define AUV2_ENTRY CodecSim_Entry
 #define AUV2_ENTRY_STR "CodecSim_Entry"

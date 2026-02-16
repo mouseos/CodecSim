@@ -21,6 +21,7 @@ enum EParams
   kParamBitrate,        // Bitrate preset selection (enum: 32,48,64,96,128,160,192,256,320,Other)
   kParamBitrateCustom,  // Custom bitrate in kbps (used when "Other" is selected)
   kParamSampleRate,     // Sample rate selection (enum: 8000,16000,22050,32000,44100,48000,88200,96000)
+  kParamChannels,       // Channel mode (0=Stereo, 1=Mono)
   kParamEnabled,        // Start/Stop toggle (0=stopped, 1=running)
 
   kNumParams
@@ -39,6 +40,7 @@ enum ECtrlTags
   kCtrlTagBitrateSelector,
   kCtrlTagBitrateCustom,
   kCtrlTagSampleRateSelector,
+  kCtrlTagChannelSelector,
 
   kCtrlTagApplyButton,
   kCtrlTagLogDisplay,
@@ -154,6 +156,7 @@ private:
   void UpdateBitrateForCodec(int codecIndex);
   int GetEffectiveBitrate();
   void UpdateOptionsForCodec(int codecIndex);
+  void UpdateChannelSelectorForCodec(int codecIndex);
   void SetDetailTab(int tabIndex);
   std::string BuildCurrentAdditionalArgs();
   void SaveStandaloneState();

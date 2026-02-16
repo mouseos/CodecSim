@@ -54,6 +54,7 @@ void CodecRegistry::RegisterBuiltinCodecs()
       576,                // latencySamples
       "",                 // additionalArgs
       false,              // isLossless
+      false,              // monoOnly
       false,              // available (detected later)
       // options
       {
@@ -77,8 +78,9 @@ void CodecRegistry::RegisterBuiltinCodecs()
       1024,
       2048,
       "",
-      false,
-      false,
+      false,              // isLossless
+      false,              // monoOnly
+      false,              // available
       {
         {"aac_coder", "Coder", "-aac_coder", CodecOptionType::Choice, 0, 0, 0,
           {{"Two-loop", "twoloop"}, {"Fast", "fast"}}},
@@ -97,8 +99,9 @@ void CodecRegistry::RegisterBuiltinCodecs()
       1024,
       2048,
       "-profile:a aac_he -afterburner 1",
-      false,
-      false,
+      false,              // isLossless
+      false,              // monoOnly
+      false,              // available
       {
         {"heaac_vbr", "VBR Mode", "-vbr", CodecOptionType::Choice, 0, 0, 0,
           {{"CBR", "0"}, {"VBR 1", "1"}, {"VBR 2", "2"}, {"VBR 3", "3"}, {"VBR 4", "4"}, {"VBR 5", "5"}}},
@@ -117,8 +120,9 @@ void CodecRegistry::RegisterBuiltinCodecs()
       960,
       312,
       "",
-      false,
-      false,
+      false,              // isLossless
+      false,              // monoOnly
+      false,              // available
       {
         {"opus_app", "Application", "-application", CodecOptionType::Choice, 1, 0, 0,
           {{"VoIP", "voip"}, {"Audio", "audio"}, {"Low Delay", "lowdelay"}}},
@@ -139,8 +143,9 @@ void CodecRegistry::RegisterBuiltinCodecs()
       1024,
       512,
       "",
-      false,
-      false
+      false,              // isLossless
+      false,              // monoOnly
+      false               // available
     },
     // AC-3
     {
@@ -155,8 +160,9 @@ void CodecRegistry::RegisterBuiltinCodecs()
       1536,
       1536,
       "",
-      false,
-      false,
+      false,              // isLossless
+      false,              // monoOnly
+      false,              // available
       {
         {"ac3_dialnorm", "Dialogue Norm", "-dialnorm", CodecOptionType::IntRange, -31, -31, -1, {}},
       }
@@ -174,8 +180,9 @@ void CodecRegistry::RegisterBuiltinCodecs()
       1536,
       1536,
       "",
-      false,
-      false
+      false,              // isLossless
+      false,              // monoOnly
+      false               // available
     },
     // FLAC (lossless)
     {
@@ -190,8 +197,9 @@ void CodecRegistry::RegisterBuiltinCodecs()
       4096,
       4096,
       "",
-      true,
-      false,
+      true,               // isLossless
+      false,              // monoOnly
+      false,              // available
       {
         {"flac_compression", "Compression", "-compression_level", CodecOptionType::IntRange, 5, 0, 12, {}},
       }
@@ -209,8 +217,9 @@ void CodecRegistry::RegisterBuiltinCodecs()
       1152,
       576,
       "",
-      false,
-      false,
+      false,              // isLossless
+      false,              // monoOnly
+      false,              // available
       {
         {"mp2_mode", "Stereo Mode", "-mode", CodecOptionType::Choice, 0, 0, 0,
           {{"Auto", "auto"}, {"Stereo", "stereo"}, {"Joint", "joint_stereo"}, {"Mono", "mono"}}},
@@ -229,8 +238,9 @@ void CodecRegistry::RegisterBuiltinCodecs()
       2048,
       2048,
       "",
-      false,
-      false
+      false,              // isLossless
+      false,              // monoOnly
+      false               // available
     },
     // G.711 A-law
     {
@@ -245,8 +255,9 @@ void CodecRegistry::RegisterBuiltinCodecs()
       160,
       160,
       "",
-      false,
-      false
+      false,              // isLossless
+      false,              // monoOnly
+      false               // available
     },
     // G.711 mu-law
     {
@@ -261,8 +272,9 @@ void CodecRegistry::RegisterBuiltinCodecs()
       160,
       160,
       "",
-      false,
-      false
+      false,              // isLossless
+      false,              // monoOnly
+      false               // available
     },
     // Speex (speech codec)
     {
@@ -277,8 +289,9 @@ void CodecRegistry::RegisterBuiltinCodecs()
       320,
       320,
       "",
-      false,
-      false,
+      false,              // isLossless
+      false,              // monoOnly
+      false,              // available
       {
         {"speex_quality", "CBR Quality", "-cbr_quality", CodecOptionType::IntRange, 8, 0, 10, {}},
         {"speex_vad", "VAD", "-vad", CodecOptionType::Toggle, 0, 0, 1, {}},
@@ -297,8 +310,9 @@ void CodecRegistry::RegisterBuiltinCodecs()
       160,
       160,
       "-ar 8000 -ac 1",
-      false,
-      false
+      false,              // isLossless
+      true,               // monoOnly (mono only codec)
+      false               // available
     },
     //==========================================================================
     // Tier 1: Bluetooth / Mobile / Surround
@@ -317,8 +331,9 @@ void CodecRegistry::RegisterBuiltinCodecs()
       160,
       160,
       "-ar 8000 -ac 1 -b:a 12200",
-      false,
-      false
+      false,              // isLossless
+      true,               // monoOnly (mono only codec)
+      false               // available
     },
     // AMR-WB (HD Voice / VoLTE, 3GPP, 16kHz mono only)
     // Discrete modes: 6.60/8.85/12.65/14.25/15.85/18.25/19.85/23.05/23.85 kbps
@@ -334,8 +349,9 @@ void CodecRegistry::RegisterBuiltinCodecs()
       320,
       320,
       "-ar 16000 -ac 1 -b:a 23850",
-      false,
-      false
+      false,              // isLossless
+      true,               // monoOnly (mono only codec)
+      false               // available
     },
     // aptX (Bluetooth, fixed 4:1 ratio)
     {
@@ -350,8 +366,9 @@ void CodecRegistry::RegisterBuiltinCodecs()
       4,
       4,
       "",
-      true,
-      false
+      true,               // isLossless
+      false,              // monoOnly
+      false               // available
     },
     // aptX HD (Bluetooth HD, fixed ratio)
     {
@@ -366,8 +383,9 @@ void CodecRegistry::RegisterBuiltinCodecs()
       4,
       4,
       "",
-      true,
-      false
+      true,               // isLossless
+      false,              // monoOnly
+      false               // available
     },
     // SBC (Bluetooth A2DP mandatory codec)
     {
@@ -382,8 +400,9 @@ void CodecRegistry::RegisterBuiltinCodecs()
       128,
       128,
       "",
-      false,
-      false
+      false,              // isLossless
+      false,              // monoOnly
+      false               // available
     },
     // DTS (surround sound)
     {
@@ -398,8 +417,9 @@ void CodecRegistry::RegisterBuiltinCodecs()
       512,
       512,
       "-strict experimental",
-      false,
-      false
+      false,              // isLossless
+      false,              // monoOnly
+      false               // available
     },
     //==========================================================================
     // Tier 2: Telephony / VoIP / ADPCM
@@ -417,8 +437,9 @@ void CodecRegistry::RegisterBuiltinCodecs()
       160,
       160,
       "-ar 8000 -ac 1",
-      false,
-      false,
+      false,              // isLossless
+      true,               // monoOnly (mono only codec)
+      false,              // available
       {
         {"ilbc_mode", "Frame Mode", "-mode", CodecOptionType::Choice, 1, 0, 0,
           {{"20ms", "20"}, {"30ms", "30"}}},
@@ -437,8 +458,9 @@ void CodecRegistry::RegisterBuiltinCodecs()
       240,
       240,
       "-ar 8000 -ac 1 -b:a 6300",
-      false,
-      false
+      false,              // isLossless
+      true,               // monoOnly (mono only codec)
+      false               // available
     },
     // G.722 ADPCM (ISDN wideband telephony)
     {
@@ -453,8 +475,9 @@ void CodecRegistry::RegisterBuiltinCodecs()
       320,
       320,
       "",
-      true,
-      false
+      true,               // isLossless
+      false,              // monoOnly
+      false               // available
     },
     // G.726 ADPCM (classic telephony, 8kHz mono only)
     {
@@ -469,8 +492,9 @@ void CodecRegistry::RegisterBuiltinCodecs()
       160,
       160,
       "-ar 8000 -ac 1",
-      false,
-      false,
+      false,              // isLossless
+      true,               // monoOnly (mono only codec)
+      false,              // available
       {
         {"g726_code", "Code Size", "-code_size", CodecOptionType::Choice, 2, 0, 0,
           {{"2 (16k)", "2"}, {"3 (24k)", "3"}, {"4 (32k)", "4"}, {"5 (40k)", "5"}}},
@@ -489,8 +513,9 @@ void CodecRegistry::RegisterBuiltinCodecs()
       1024,
       1024,
       "",
-      true,
-      false
+      true,               // isLossless
+      false,              // monoOnly
+      false               // available
     },
     // ADPCM Microsoft (classic Windows, fixed ratio)
     {
@@ -505,8 +530,9 @@ void CodecRegistry::RegisterBuiltinCodecs()
       1024,
       1024,
       "",
-      true,
-      false
+      true,               // isLossless
+      false,              // monoOnly
+      false               // available
     },
     // Nellymoser (Flash-era streaming, mono only, max 44100Hz)
     {
@@ -521,8 +547,9 @@ void CodecRegistry::RegisterBuiltinCodecs()
       256,
       256,
       "-ar 44100 -ac 1",
-      false,
-      false
+      false,              // isLossless
+      true,               // monoOnly (mono only codec)
+      false               // available
     },
     //==========================================================================
     // Tier 3: Retro / Novelty / Extra
@@ -540,8 +567,9 @@ void CodecRegistry::RegisterBuiltinCodecs()
       160,
       160,
       "",
-      true,
-      false
+      true,               // isLossless
+      false,              // monoOnly
+      false               // available
     },
     // DFPWM (1-bit audio, Minecraft ComputerCraft)
     {
@@ -556,8 +584,9 @@ void CodecRegistry::RegisterBuiltinCodecs()
       1024,
       1024,
       "",
-      true,
-      false
+      true,               // isLossless
+      false,              // monoOnly
+      false               // available
     },
     // WMA v1 (Windows Media Audio 1)
     {
@@ -572,8 +601,9 @@ void CodecRegistry::RegisterBuiltinCodecs()
       2048,
       2048,
       "",
-      false,
-      false
+      false,              // isLossless
+      false,              // monoOnly
+      false               // available
     },
     // WavPack (lossless)
     {
@@ -588,8 +618,9 @@ void CodecRegistry::RegisterBuiltinCodecs()
       4096,
       4096,
       "",
-      true,
-      false,
+      true,               // isLossless
+      false,              // monoOnly
+      false,              // available
       {
         {"wavpack_comp", "Compression", "-compression_level", CodecOptionType::IntRange, 1, 0, 8, {}},
       }
@@ -607,8 +638,9 @@ void CodecRegistry::RegisterBuiltinCodecs()
       1024,
       1024,
       "",
-      true,
-      false
+      true,               // isLossless
+      false,              // monoOnly
+      false               // available
     },
   };
 }

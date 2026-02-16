@@ -1,9 +1,15 @@
 # Build output
 build/
+build-trial/
 
 # Third-party dependencies (too large for git)
-iPlug2/
 ffmpeg/
+ffmpeg-nonfree/
+ffmpeg-nonfree.7z
+
+# Temporary files
+_content.b64
+_decode_and_write.py
 
 # Debug logs
 *.log

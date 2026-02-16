@@ -1,0 +1,213 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Job 1: Build (Windows-only, matrix for trial/paid)
+  # ---------------------------------------------------------------------------
+  build:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        build_type: [trial, paid]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Apply iPlug2 patches
+        run: |
+          cd iPlug2
+          git apply ../patches/iplug2-vst3-bus-activation.patch
+
+      - name: Download FFmpeg LGPL shared build
+        shell: pwsh
+        run: |
+          $ffmpegUrl = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-lgpl-shared.zip"
+          Invoke-WebRequest -Uri $ffmpegUrl -OutFile ffmpeg.zip
+          Expand-Archive -Path ffmpeg.zip -DestinationPath ffmpeg-temp
+          $ffmpegDir = Get-ChildItem ffmpeg-temp -Directory | Select-Object -First 1
+          New-Item -ItemType Directory -Path ffmpeg/bin -Force
+          Copy-Item "$($ffmpegDir.FullName)/bin/*" -Destination ffmpeg/bin/ -Recurse
+          Copy-Item "$($ffmpegDir.FullName)/LICENSE.txt" -Destination ffmpeg/ -ErrorAction SilentlyContinue
+
+      - name: Configure CMake (paid)
+        if: matrix.build_type == 'paid'
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Configure CMake (trial)
+        if: matrix.build_type == 'trial'
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DCODECSIM_TRIAL=ON
+
+      - name: Build VST3
+        run: cmake --build build --target CodecSim-vst3 --config Release
+
+      - name: Build Standalone
+        if: matrix.build_type == 'paid'
+        run: cmake --build build --target CodecSim-app --config Release
+
+      - name: Upload VST3 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CodecSim-windows-${{ matrix.build_type }}-VST3
+          path: build/out/CodecSim.vst3
+
+      - name: Upload Standalone artifact
+        if: matrix.build_type == 'paid'
+        uses: actions/upload-artifact@v4
+        with:
+          name: CodecSim-windows-${{ matrix.build_type }}-Standalone
+          path: |
+            build/out/CodecSim.exe
+            build/out/ffmpeg.exe
+            build/out/LICENSE-ffmpeg.txt
+
+      - name: Upload readme files
+        if: matrix.build_type == 'paid'
+        uses: actions/upload-artifact@v4
+        with:
+          name: readme-files
+          path: README.md
+
+  # ---------------------------------------------------------------------------
+  # Job 2: Installer (Inno Setup, tag builds only)
+  # ---------------------------------------------------------------------------
+  installer:
+    needs: build
+    runs-on: windows-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download paid VST3 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: CodecSim-windows-paid-VST3
+          path: build/out/CodecSim.vst3
+
+      - name: Download paid Standalone artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: CodecSim-windows-paid-Standalone
+          path: build/out
+
+      - name: Download trial VST3 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: CodecSim-windows-trial-VST3
+          path: build-trial/out/CodecSim.vst3
+
+      - name: Setup Inno Setup
+        uses: egor-tensin/setup-inno-setup@v1
+
+      - name: Build Full installer
+        run: iscc installer/CodecSim_Full.iss
+
+      - name: Build Trial installer
+        run: iscc installer/CodecSim_Trial.iss
+
+      - name: Upload Full installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CodecSim-Setup
+          path: build/installer/CodecSim_Setup.exe
+
+      - name: Upload Trial installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CodecSimTrial-Setup
+          path: build/installer/CodecSimTrial_Setup.exe
+
+  # ---------------------------------------------------------------------------
+  # Job 3: Release (create draft GitHub Release, tag builds only)
+  # ---------------------------------------------------------------------------
+  release:
+    needs: [build, installer]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+
+    steps:
+      - name: Get version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+
+      - name: Download paid VST3 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: CodecSim-windows-paid-VST3
+          path: paid-vst3/CodecSim.vst3
+
+      - name: Download paid Standalone artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: CodecSim-windows-paid-Standalone
+          path: paid-standalone
+
+      - name: Download trial VST3 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: CodecSim-windows-trial-VST3
+          path: trial-vst3/CodecSim.vst3
+
+      - name: Download readme files
+        uses: actions/download-artifact@v4
+        with:
+          name: readme-files
+          path: readme
+
+      - name: Download Full installer
+        uses: actions/download-artifact@v4
+        with:
+          name: CodecSim-Setup
+          path: installers
+
+      - name: Download Trial installer
+        uses: actions/download-artifact@v4
+        with:
+          name: CodecSimTrial-Setup
+          path: installers
+
+      - name: Organize Trial package
+        run: |
+          mkdir -p "CodecSim-Trial/Windows/VST3"
+          cp -r trial-vst3/CodecSim.vst3 "CodecSim-Trial/Windows/VST3/CodecSim.vst3"
+          cp readme/README.md "CodecSim-Trial/README.md"
+
+      - name: Organize Paid package
+        run: |
+          mkdir -p "CodecSim-Paid/Windows/VST3"
+          mkdir -p "CodecSim-Paid/Windows/Standalone"
+          cp -r paid-vst3/CodecSim.vst3 "CodecSim-Paid/Windows/VST3/CodecSim.vst3"
+          cp paid-standalone/CodecSim.exe "CodecSim-Paid/Windows/Standalone/CodecSim.exe"
+          cp paid-standalone/ffmpeg.exe "CodecSim-Paid/Windows/Standalone/ffmpeg.exe"
+          cp paid-standalone/LICENSE-ffmpeg.txt "CodecSim-Paid/Windows/Standalone/LICENSE-ffmpeg.txt"
+          cp readme/README.md "CodecSim-Paid/README.md"
+
+      - name: Create ZIP archives
+        env:
+          VERSION: ${{ steps.version.outputs.VERSION }}
+        run: |
+          zip -r "CodecSim-${VERSION}-Trial.zip" CodecSim-Trial
+          zip -r "CodecSim-${VERSION}-Paid.zip" CodecSim-Paid
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          draft: true
+          generate_release_notes: true
+          files: |
+            CodecSim-${{ steps.version.outputs.VERSION }}-Trial.zip
+            CodecSim-${{ steps.version.outputs.VERSION }}-Paid.zip
+            installers/CodecSim_Setup.exe
+            installers/CodecSimTrial_Setup.exe

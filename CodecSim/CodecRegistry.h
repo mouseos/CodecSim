@@ -52,6 +52,7 @@ struct CodecInfo
   int latencySamples;         // Estimated latency in samples
   std::string additionalArgs; // Extra ffmpeg encoder arguments
   bool isLossless;            // If true, bitrate control is disabled
+  bool monoOnly;              // If true, codec only supports mono (1 channel)
   bool available;             // Detected at runtime via ffmpeg -encoders
   std::vector<CodecOptionDef> options;    // Codec-specific configurable options
 };
