@@ -72,7 +72,7 @@ Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent; Components: standalone
 
 [UninstallDelete]
-Type: filesandirs; Name: "{commoncf}\VST3\CodecSim.vst3"
+Type: filesandordirs; Name: "{commoncf}\VST3\CodecSim.vst3"
 
 [Code]
 function InitializeSetup(): Boolean;
