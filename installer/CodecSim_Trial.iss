@@ -17,6 +17,7 @@ AppUpdatesURL=https://mousesoft.booth.pm/
 DefaultDirName={commonpf}\CodecSim Trial
 DefaultGroupName=CodecSim Trial
 OutputBaseFilename=CodecSimTrial_Setup_{#MyAppVersion}
+OutputDir=..\build\installer
 Compression=lzma2
 SolidCompression=yes
 ArchitecturesAllowed=x64compatible
