@@ -131,8 +131,8 @@ jobs:
           name: CodecSim-windows-trial-VST3
           path: build-trial/out/CodecSim.vst3
 
-      - name: Setup Inno Setup
-        uses: egor-tensin/setup-inno-setup@v1
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
 
       - name: Get version from tag
         id: version
