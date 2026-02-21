@@ -1374,7 +1374,6 @@ void CodecSim::UpdateBitrateForCodec(int codecIndex)
 
   // Update the bitrate parameter
   IParam* pBitrate = GetParam(kParamBitrate);
-  pBitrate->ClearDisplayTexts();
 
   int numPresets = static_cast<int>(mCurrentBitratePresets.size());
   int totalEntries = mCurrentCodecHasOther ? numPresets + 1 : std::max(numPresets, 1);
