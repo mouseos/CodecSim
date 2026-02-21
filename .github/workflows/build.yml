@@ -46,16 +46,10 @@ jobs:
           echo "Bus activation fix applied:"
           grep -n "setActive" "$FILE"
 
-          # 2. Add ClearDisplayTexts() method to IParam
-          FILE2="iPlug2/IPlug/IPlugParameter.h"
-          sed -i '/MapDisplayText/a\  /** Clear all display texts *\/\n  void ClearDisplayTexts() { mDisplayTexts.Resize(0); }' "$FILE2"
-          echo "ClearDisplayTexts added:"
-          grep -n "ClearDisplayTexts" "$FILE2"
-
-      - name: Download FFmpeg LGPL shared build
+      - name: Download FFmpeg LGPL build
         shell: pwsh
         run: |
-          $ffmpegUrl = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-lgpl-shared.zip"
+          $ffmpegUrl = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-lgpl.zip"
           Invoke-WebRequest -Uri $ffmpegUrl -OutFile ffmpeg.zip
           Expand-Archive -Path ffmpeg.zip -DestinationPath ffmpeg-temp
           $ffmpegDir = Get-ChildItem ffmpeg-temp -Directory | Select-Object -First 1
