@@ -652,7 +652,7 @@ void CodecRegistry::DetectAvailable(const std::string& ffmpegPath)
   std::lock_guard<std::mutex> lock(mMutex);
   DebugLogRegistry("DetectAvailable: running " + ffmpegPath + " -encoders");
   // Run ffmpeg -encoders and capture output
-  std::string command = ffmpegPath + " -encoders 2>&1";
+  std::string command = "\"" + ffmpegPath + "\" -encoders 2>&1";
   FILE* pipe = _popen(command.c_str(), "r");
   if (!pipe)
   {
