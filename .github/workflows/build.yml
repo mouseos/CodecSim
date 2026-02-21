@@ -46,10 +46,10 @@ jobs:
           echo "Bus activation fix applied:"
           grep -n "setActive" "$FILE"
 
-      - name: Download FFmpeg LGPL build
+      - name: Download FFmpeg LGPL shared build
         shell: pwsh
         run: |
-          $ffmpegUrl = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-lgpl.zip"
+          $ffmpegUrl = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-lgpl-shared.zip"
           Invoke-WebRequest -Uri $ffmpegUrl -OutFile ffmpeg.zip
           Expand-Archive -Path ffmpeg.zip -DestinationPath ffmpeg-temp
           $ffmpegDir = Get-ChildItem ffmpeg-temp -Directory | Select-Object -First 1
@@ -86,6 +86,7 @@ jobs:
           path: |
             build/out/CodecSim.exe
             build/out/ffmpeg.exe
+            build/out/*.dll
             build/out/LICENSE-ffmpeg.txt
 
       - name: Upload readme files
@@ -220,6 +221,7 @@ jobs:
           cp -r paid-vst3/CodecSim.vst3 "CodecSim-Paid/Windows/VST3/CodecSim.vst3"
           cp paid-standalone/CodecSim.exe "CodecSim-Paid/Windows/Standalone/CodecSim.exe"
           cp paid-standalone/ffmpeg.exe "CodecSim-Paid/Windows/Standalone/ffmpeg.exe"
+          cp paid-standalone/*.dll "CodecSim-Paid/Windows/Standalone/" 2>/dev/null || true
           cp paid-standalone/LICENSE-ffmpeg.txt "CodecSim-Paid/Windows/Standalone/LICENSE-ffmpeg.txt"
           cp readme/README.md "CodecSim-Paid/README.md"
 

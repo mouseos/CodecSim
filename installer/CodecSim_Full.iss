@@ -59,6 +59,7 @@ Source: "..\build\out\CodecSim.vst3\*"; DestDir: "{commoncf}\VST3\CodecSim.vst3"
 ; Standalone Application
 Source: "..\build\out\CodecSim.exe"; DestDir: "{app}"; Components: standalone; Flags: ignoreversion
 Source: "..\build\out\ffmpeg.exe"; DestDir: "{app}"; Components: standalone; Flags: ignoreversion
+Source: "..\build\out\*.dll"; DestDir: "{app}"; Components: standalone; Flags: ignoreversion skipifsourcedoesntexist
 Source: "..\build\out\LICENSE-ffmpeg.txt"; DestDir: "{app}"; Components: standalone; Flags: ignoreversion
 
 ; README
